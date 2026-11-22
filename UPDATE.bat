@@ -46,6 +46,7 @@ if "%RC%"=="10" (
 ) else (
     echo [!] Could not update right now ^(no internet or GitHub unreachable^). Your game was not changed.
 )
+echo Details are saved in update_log.txt
 echo.
 choice /C YN /M "Start the game now"
 if errorlevel 2 exit /b 0

@@ -937,7 +937,8 @@ class TwoWheeler(Vehicle):
     # ---- manual wheelie (CTRL): no auto-balance, the rider has to feather it
     BALANCE = 74.0          # balance point in degrees: beyond it the bike flips over backwards
     GRAVITY = 260.0
-    LIFT = 520.0
+    LIFT = 360.0
+    MAX_RISE = 38.0         # deg/s - the front comes up slowly and smoothly
 
     def update(self, dt):
         if self.remote:
@@ -968,8 +969,11 @@ class TwoWheeler(Vehicle):
             torque -= 380.0                     # rear brake drops the front wheel
         if not rider:
             torque -= 200.0
-        torque -= self.wheelie_w * 1.2
+        torque -= self.wheelie_w * 2.0
         self.wheelie_w += torque * dt
+        if lift_on:
+            # the motor can only raise the front this fast; gravity can still win near the balance point
+            self.wheelie_w = min(self.wheelie_w, self.MAX_RISE * (0.6 + 0.4 * max(0.0, self.throttle)))
         self.wheelie += self.wheelie_w * dt
         if self.wheelie <= 0.0:
             if self.wheelie_w < -60:

@@ -490,6 +490,9 @@ class Vehicle:
         steer_gain = clampf(sp / 5.0, 0.0, 1.0) / (1.0 + sp * 0.022 * (0.45 if sliding else 1.0))
         dirn = 1.0 if vl >= -0.1 else -1.0
         target_yaw = self.steer * self.steer_rate * steer_gain * dirn
+        if two and getattr(self, 'wheelie', 0.0) > 10.0:
+            # on the back wheel the bike pivots easily: sharper turns, even at low speed
+            target_yaw = self.steer * self.steer_rate * max(steer_gain, 0.75) * 1.35 * dirn
         if not two and self.handbrake and sp > 3.0:
             target_yaw *= 2.1
         elif sliding and thr > 0.3:
@@ -951,8 +954,6 @@ class TwoWheeler(Vehicle):
             super().update(dt)
             return
         self._wheelie(dt)
-        if self.wheelie > 10:
-            self.steer *= 0.45                  # hard to steer on the back wheel
         super().update(dt)
 
     def _wheelie(self, dt):

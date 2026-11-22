@@ -1157,6 +1157,54 @@ class VehicleManager:
                 v.primary = rng.randrange(len(PAINT_COLORS))
                 v.accent = rng.randrange(len(ACCENT_COLORS))
                 v.build_model()
+        # fixed ids for the e-vehicles so your tuning can be saved and loaded again
+        n = 0
+        for v in self.list:
+            if v.is_two_wheeler:
+                v.save_id = 'ev%d' % n
+                n += 1
+
+    def tuned_state(self):
+        out = {}
+        for v in self.list:
+            sid = getattr(v, 'save_id', None)
+            if sid and getattr(v, 'tuned', False):
+                out[sid] = dict(kind=v.kind, motor=v.motor_tier, motor_owned=getattr(v, 'motor_owned', v.motor_tier),
+                                battery=v.battery_tier, battery_owned=getattr(v, 'battery_owned', v.battery_tier),
+                                susp=v.susp_tier, susp_owned=sorted(getattr(v, 'susp_owned', {0})),
+                                primary=v.primary, accent=v.accent, charge=round(float(v.battery_wh), 1),
+                                x=round(v.x, 2), z=round(v.z, 2), h=round(v.heading, 1))
+        return out
+
+    def load_tuned(self, data):
+        by_id = {getattr(v, 'save_id', None): v for v in self.list}
+        for sid, d in (data or {}).items():
+            v = by_id.get(sid)
+            if v is None or d.get('kind') != v.kind:
+                continue
+            try:
+                n_m = len(v.motor_tiers())
+                v.motor_tier = max(0, min(n_m - 1, int(d.get('motor', 0))))
+                v.motor_owned = max(v.motor_tier, min(n_m - 1, int(d.get('motor_owned', 0))))
+                v.battery_tier = max(0, min(len(BATTERY_TIERS) - 1, int(d.get('battery', 0))))
+                v.battery_owned = max(v.battery_tier, min(len(BATTERY_TIERS) - 1, int(d.get('battery_owned', 0))))
+                v.susp_tier = max(0, min(len(SUSPENSION_TIERS) - 1, int(d.get('susp', 0))))
+                v.susp_owned = set(int(q) for q in d.get('susp_owned', [0])) | {0, v.susp_tier}
+                v.battery_wh = max(0.0, min(v.capacity, float(d.get('charge', v.capacity))))
+                p = int(d.get('primary', v.primary)) % len(PAINT_COLORS)
+                a = int(d.get('accent', v.accent)) % len(ACCENT_COLORS)
+                if (p, a) != (v.primary, v.accent):
+                    v.primary, v.accent = p, a
+                    v.build_model()
+                if 'x' in d:
+                    v.x, v.z, v.heading = float(d['x']), float(d['z']), float(d.get('h', v.heading)) % 360.0
+                    v.y = self.world.ground_height(v.x, v.z)
+                    v.vx = v.vz = v.vy = v.yaw_rate = 0.0
+                    v.asleep = False
+                    v.update_visuals(0.0)
+                v.tuned = True
+            except Exception as ex:
+                print('[save] could not restore', sid, ex)
 
     def interactions(self, player):
         out = []

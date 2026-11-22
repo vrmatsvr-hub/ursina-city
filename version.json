@@ -1,5 +1,5 @@
 {
-  "version": "1.5.1",
+  "version": "1.5.2",
   "files": ["main.py", "world.py", "player.py", "vehicles.py", "npcs.py", "items_and_shops.py",
             "menus.py", "network.py", "updater.py", "README.md"],
   "remove": []

@@ -783,8 +783,12 @@ class TuningMenu(Menu):
     def _pay(self, cost):
         if cost <= 0:
             self.game.sound.play('blip', 0.6)
+            self.v.tuned = True
             return True
-        return self.game.player.spend(cost)
+        ok = self.game.player.spend(cost)
+        if ok:
+            self.v.tuned = True              # saved in savegame.json with its parts, paint and parking spot
+        return ok
 
     def set_motor(self, i, cost):
         v = self.v
@@ -822,10 +826,12 @@ class TuningMenu(Menu):
             return
         if self.game.player.spend(PAINT_PRICE):
             v.repaint(primary, accent)
+            v.tuned = True
         self.rebuild()
 
     def on_close(self):
         self.v.frozen = False
+        self.game.save_progress()
 
 
 class TuningGarage:

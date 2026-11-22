@@ -202,6 +202,7 @@ class Game(Entity):
                 'fireworks': dict(fw.inv),
                 'businesses': [dict(owned=bool(st['owned']), level=int(st['level']), safe=float(st['safe']))
                                for st in sh.business.state],
+                'vehicles': self.vehicles.tuned_state(),
             }
             write_save(self.save)
         except Exception as ex:
@@ -216,6 +217,7 @@ class Game(Entity):
             for k, n in pr.get('fireworks', {}).items():
                 if k in self.fireworks.inv:
                     self.fireworks.inv[k] = max(0, int(n))
+            self.vehicles.load_tuned(pr.get('vehicles', {}))
             bs = self.shops.business
             for i, saved in enumerate(pr.get('businesses', [])[:len(bs.state)]):
                 st = bs.state[i]

@@ -488,7 +488,7 @@ class DealerMenu(Menu):
 # =================================================================== robberies
 class RobberySystem:
     DURATION = 4.5
-    PAYOUT = {'convenience': (280, 620), 'electronics': (700, 1300), 'jewelry': (1600, 2800), 'gas': (450, 950)}
+    PAYOUT = {'convenience': (750, 1500), 'electronics': (1800, 3200), 'jewelry': (4000, 7000), 'gas': (1200, 2400)}
     STARS = {'convenience': 2, 'electronics': 2, 'jewelry': 3, 'gas': 2}
 
     def __init__(self, game):

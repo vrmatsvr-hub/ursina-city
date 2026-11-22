@@ -988,8 +988,9 @@ class TwoWheeler(Vehicle):
             self.fall_over()
 
     def _bank_wheelie(self):
-        if self.wheelie_time > 1.5 and self.driver == 'player':
-            cash = int(self.wheelie_time * 12)
+        if self.wheelie_time > 1.0 and self.driver == 'player':
+            t = self.wheelie_time
+            cash = int(t * 45 + t * t * 4)          # long wheelies pay extra
             self.game.player.add_cash(cash, 'WHEELIE %.1fs' % self.wheelie_time)
         self.wheelie_time = 0.0
 

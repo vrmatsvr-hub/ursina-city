@@ -176,13 +176,13 @@ class Player:
         self.game.hud.notify('You flipped the wheelie!  Feather CTRL to hold the balance point.', rgb(255, 120, 90))
 
     # ---- death / arrest
-    def _go_down(self, state, text, loss):
+    def _go_down(self, state, text, loss, fine=None):
         g = self.game
         if self.vehicle is not None:
             self.exit_vehicle()
         self.state = state
         self.timer = 4.0
-        lost = int(self.cash * loss)
+        lost = int(self.cash * loss) if fine is None else min(int(self.cash), int(fine))
         self.cash -= lost
         g.hud.big_text(text, '-$%s' % format(lost, ','))
         g.wanted.clear()
@@ -192,7 +192,7 @@ class Player:
         self._go_down('dead', 'WASTED', 0.1)
 
     def busted(self):
-        self._go_down('busted', 'BUSTED', 0.25)
+        self._go_down('busted', 'BUSTED', 0.0, fine=random.randint(45, 55))   # small bail fee
 
     def respawn(self):
         sx, sy, sz = self.world.hospital_spawn
@@ -615,6 +615,131 @@ class HUD:
         k = self.map_k
         return (cx + clampf(x, -self.map_ext, self.map_ext) * k, cy + clampf(z, -self.map_ext, self.map_ext) * k)
 
+    # ---- big full-screen map (M)
+    def toggle_bigmap(self):
+        if getattr(self, 'bigmap', None):
+            for e in self.bigmap:
+                destroy(e)
+            self.bigmap = None
+            return
+        if self.help_panel is not None:
+            self.toggle_help()
+        from world import LOT_SPECIAL, HALF_ROAD, N_BLOCKS
+        g = self.game
+        ui = camera.ui
+        s = 0.86
+        ext = BOUNDARY + 6
+        k = s / (2 * ext)
+        cx, cy = -0.17, 0.0
+        self.bm_k, self.bm_c, self.bm_ext = k, (cx, cy), ext
+        E = []
+
+        def quad(x, y, sx, sy, col, z, **kw):
+            e = Entity(parent=ui, model='quad', position=(x, y), scale=(sx, sy), color=col, z=z, **kw)
+            E.append(e)
+            return e
+
+        quad(0, 0, 4, 2, rgb(0, 0, 0, 170), -0.40)                                     # dim the game
+        quad(cx, cy, s + 0.012, s + 0.012, rgb(255, 140, 30), -0.41)
+        quad(cx, cy, s, s, rgb(46, 92, 128), -0.42)                                    # water
+        land = (BOUNDARY - 4) * 2 * k
+        quad(cx, cy, land, land, rgb(58, 96, 52), -0.43)                               # dike / grass
+        span = (ASPHALT_MAX - ASPHALT_MIN) * k
+        quad(cx, cy, span, span, rgb(52, 54, 58), -0.44)                               # asphalt
+        lot_cols = {'park': rgb(70, 140, 60), 'parking': rgb(88, 90, 96), 'shop': rgb(150, 130, 40),
+                    'garage': rgb(20, 120, 140), 'business': rgb(110, 60, 150)}
+        for i in range(N_BLOCKS):
+            for j in range(N_BLOCKS):
+                x0, z0 = ROADS[i] + HALF_ROAD, ROADS[j] + HALF_ROAD
+                x1, z1 = ROADS[i + 1] - HALF_ROAD, ROADS[j + 1] - HALF_ROAD
+                spec = LOT_SPECIAL.get((i, j))
+                col = lot_cols.get(spec[0], rgb(120, 116, 110)) if spec else rgb(112, 108, 104)
+                mx, mz = (x0 + x1) / 2, (z0 + z1) / 2
+                quad(cx + mx * k, cy + mz * k, (x1 - x0) * k, (z1 - z0) * k, col, -0.45)
+                if spec is None:                                                       # little building blocks
+                    for (ox, oz) in ((-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)):
+                        quad(cx + (mx + ox * (x1 - x0)) * k, cy + (mz + oz * (z1 - z0)) * k,
+                             (x1 - x0) * 0.4 * k, (z1 - z0) * 0.4 * k, rgb(150, 144, 136), -0.46)
+                elif len(spec) > 1:
+                    name = str(spec[1]).replace('&', 'and')
+                    t = Text(text=name, parent=ui, position=(cx + mx * k, cy + mz * k), origin=(0, 0), scale=0.62,
+                             color=rgb(255, 255, 255), z=-0.47)
+                    E.append(t)
+                elif spec[0] in ('park', 'garage', 'parking'):
+                    t = Text(text={'park': 'PARK', 'garage': 'E-TUNING', 'parking': 'PARKING'}[spec[0]], parent=ui,
+                             position=(cx + mx * k, cy + mz * k), origin=(0, 0), scale=0.62, color=rgb(255, 255, 255), z=-0.47)
+                    E.append(t)
+        for rc in ROADS:                                                               # lane markings
+            quad(cx + rc * k, cy, 0.0015, span, rgb(220, 210, 120, 140), -0.455)
+            quad(cx, cy + rc * k, span, 0.0015, rgb(220, 210, 120, 140), -0.455)
+        poi_cols = {'shop': rgb(255, 220, 40), 'garage': rgb(0, 220, 255), 'dealer': rgb(255, 120, 20), 'business': rgb(200, 90, 255)}
+        for (x, z, kind) in g.world.pois:
+            quad(cx + x * k, cy + z * k, 0.018, 0.018, poi_cols.get(kind, color.white), -0.48,
+                 rotation_z=45 if kind == 'business' else 0)
+        try:
+            for (x, z) in g.shops.activities.trials.start_positions():
+                quad(cx + x * k, cy + z * k, 0.018, 0.018, rgb(60, 130, 255), -0.48)
+        except Exception:
+            pass
+        self.bm_marks = [quad(0, 0, 0.02, 0.02, color.white, -0.49, rotation_z=45, enabled=False) for _ in range(2)]
+        self.bm_cops = [quad(0, 0, 0.014, 0.014, rgb(255, 40, 40), -0.49, enabled=False) for _ in range(4)]
+        self.bm_arrow = Entity(parent=ui, model=_triangle_mesh(), scale=0.028, color=rgb(255, 255, 255), z=-0.5, double_sided=True)
+        E.append(self.bm_arrow)
+        # legend
+        lx = cx + s / 2 + 0.05
+        quad(lx + 0.16, 0.0, 0.36, s, rgb(12, 14, 20, 235), -0.41)
+        E.append(Text(text='CITY MAP', parent=ui, position=(lx + 0.02, s / 2 - 0.04), origin=(-0.5, 0.5), scale=1.6,
+                      color=rgb(255, 150, 40), z=-0.42))
+        rows = [('You', rgb(255, 255, 255)), ('Shop - rob it', rgb(255, 220, 40)), ('Fireworks dealer', rgb(255, 120, 20)),
+                ('E-Tuning garage', rgb(0, 220, 255)), ('Business for sale', rgb(200, 90, 255)),
+                ('Time-trial start', rgb(60, 130, 255)), ('Courier pickup', rgb(60, 255, 100)),
+                ('Courier drop-off', rgb(255, 220, 40)), ('Police', rgb(255, 40, 40))]
+        y = s / 2 - 0.13
+        for name, col in rows:
+            quad(lx + 0.035, y, 0.016, 0.016, col, -0.42)
+            E.append(Text(text=name, parent=ui, position=(lx + 0.06, y), origin=(-0.5, 0), scale=0.95, z=-0.42))
+            y -= 0.045
+        y -= 0.02
+        own = [b['name'].title().replace('&', 'and') for b, st in zip(g.shops.business.data, g.shops.business.state) if st['owned']]
+        E.append(Text(text='Your businesses:\n' + ('\n'.join('  ' + n for n in own) if own else '  none yet'),
+                      parent=ui, position=(lx + 0.02, y), origin=(-0.5, 0.5), scale=0.9, color=rgb(190, 255, 190), z=-0.42))
+        E.append(Text(text='M  close map', parent=ui, position=(lx + 0.02, -s / 2 + 0.04), origin=(-0.5, 0), scale=0.9,
+                      color=rgb(160, 160, 160), z=-0.42))
+        self.bigmap = E
+        self._update_bigmap(0.0)
+
+    def _update_bigmap(self, dt):
+        g = self.game
+        pl = g.player
+        k, (cx, cy), ext = self.bm_k, self.bm_c, self.bm_ext
+
+        def mp(x, z):
+            return (cx + clampf(x, -ext, ext) * k, cy + clampf(z, -ext, ext) * k)
+
+        v = pl.vehicle
+        p = pl.pos
+        self.bm_arrow.position = mp(p.x, p.z)
+        self.bm_arrow.rotation_z = v.heading if v is not None else pl.yaw
+        bl = int(getattr(self, 'blink_t', 0.0) * 3) % 2 == 0
+        self.bm_arrow.scale = 0.028 if bl else 0.034
+        marks = g.shops.activities.markers()
+        mcol = {'pickup': rgb(60, 255, 100), 'deliver': rgb(255, 220, 40), 'ring': rgb(80, 230, 255)}
+        for i, e in enumerate(self.bm_marks):
+            if i < len(marks):
+                x, z, kind = marks[i]
+                e.enabled = True
+                e.position = mp(x, z)
+                e.color = mcol[kind]
+            else:
+                e.enabled = False
+        cops = list(g.wanted.police)
+        for i, e in enumerate(self.bm_cops):
+            if i < len(cops):
+                e.enabled = True
+                e.position = mp(cops[i].car.x, cops[i].car.z)
+            else:
+                e.enabled = False
+
     # ---- api
     def notify(self, text, col=None, life=4.0):
         t = Text(text=text, parent=self.root, position=(0, 0.44), origin=(0, 0), scale=1.15,
@@ -646,6 +771,8 @@ class HUD:
         self.big_t = 3.8
 
     def toggle_help(self):
+        if getattr(self, 'bigmap', None):
+            self.toggle_bigmap()
         if self.help_panel is not None:
             for e in self.help_panel:
                 destroy(e)
@@ -664,6 +791,7 @@ class HUD:
             '1 / 2 / 3 / scroll  select hands / Cobra 6 / Scream 100',
             'ESC  pause / close menu          F9  one-time +5,000 coin bonus',
             'F12  screenshot (saved in the screenshots folder, without the HUD)',
+            'M  full-screen city map',
             '',
             'Minimap:  yellow = shops (rob them)   orange = fireworks dealer',
             '          cyan = E-Tuning garage        purple = businesses for sale',
@@ -841,6 +969,8 @@ class HUD:
                 e.color = mcol[kind]
             else:
                 e.enabled = False
+        if getattr(self, 'bigmap', None):
+            self._update_bigmap(dt)
         cops = [q for q in g.wanted.police]
         for i, e in enumerate(self.map_cops):
             if i < len(cops):

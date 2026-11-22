@@ -21,6 +21,7 @@ the main menu over a live, slowly flying view of the city.
 import sys
 import os
 import json
+import atexit
 import time as _time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -149,10 +150,53 @@ class Game(Entity):
         self.fireworks = FireworksSystem(self)
         self.shops = ShopSystem(self)
         self.hud.add_activity_blips()
+        self.load_progress()
+        self.autosave_t = 0.0
+        atexit.register(self.save_progress)      # closing the window / Quit also saves your money
         self.menu_cam = MenuCamera(self)
         self.apply_settings()
         self.enter_main_menu()
         print('[city] ready.')
+
+    # ---- progress (money, fireworks, businesses) survives closing the game
+    def save_progress(self):
+        try:
+            pl, sh, fw = self.player, self.shops, self.fireworks
+            if pl is None or sh is None:
+                return
+            self.save['progress'] = {
+                'cash': int(pl.cash),
+                'fireworks': dict(fw.inv),
+                'businesses': [dict(owned=bool(st['owned']), level=int(st['level']), safe=float(st['safe']))
+                               for st in sh.business.state],
+            }
+            write_save(self.save)
+        except Exception as ex:
+            print('[save] progress not saved:', ex)
+
+    def load_progress(self):
+        pr = self.save.get('progress')
+        if not isinstance(pr, dict):
+            return
+        try:
+            self.player.cash = max(0, int(pr.get('cash', self.player.cash)))
+            for k, n in pr.get('fireworks', {}).items():
+                if k in self.fireworks.inv:
+                    self.fireworks.inv[k] = max(0, int(n))
+            bs = self.shops.business
+            for i, saved in enumerate(pr.get('businesses', [])[:len(bs.state)]):
+                st = bs.state[i]
+                st['level'] = max(1, min(5, int(saved.get('level', 1))))
+                st['safe'] = max(0.0, float(saved.get('safe', 0.0)))
+                if saved.get('owned'):
+                    st['owned'] = True
+                    b = bs.data[i]
+                    b['sale_text'].text = 'OWNED'
+                    b['sale_text'].color = rgb(20, 150, 40)
+                    b['price_text'].text = 'Level %d' % st['level']
+            print('[save] progress loaded: $%d' % self.player.cash)
+        except Exception as ex:
+            print('[save] could not load progress:', ex)
 
     # ---- settings / save
     def apply_settings(self):
@@ -196,7 +240,10 @@ class Game(Entity):
         self.fireworks.wheel.hide()
         if self.hud.help_panel is not None:
             self.hud.toggle_help()
+        if getattr(self.hud, 'bigmap', None):
+            self.hud.toggle_bigmap()
         pl.respawn()
+        self.save_progress()
         self.paused = False
         self.vehicles.silence()
         self.enter_main_menu()
@@ -347,6 +394,10 @@ class Game(Entity):
             if self.net is not None:
                 self.net.update(dt)          # keep the connection alive while paused
             return
+        self.autosave_t += dt
+        if self.autosave_t > 20.0:
+            self.autosave_t = 0.0
+            self.save_progress()
         self.player.update(dt)
         self.traffic.update(dt)
         self.wanted.update(dt)
@@ -372,7 +423,9 @@ class Game(Entity):
                 self.back_to_main()
             return
         if key == 'escape':
-            if self.hud.help_panel is not None:
+            if getattr(self.hud, 'bigmap', None):
+                self.hud.toggle_bigmap()
+            elif self.hud.help_panel is not None:
                 self.hud.toggle_help()
             elif self.menu is not None:
                 self.menu.close()
@@ -407,6 +460,8 @@ class Game(Entity):
         elif key == 'r':
             if pl.vehicle is not None:
                 pl.vehicle.reset_upright()
+        elif key == 'm':
+            self.hud.toggle_bigmap()
         elif key == 'f9':
             self.claim_f9_bonus()
         elif key == 'f12':

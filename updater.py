@@ -27,7 +27,7 @@ GITHUB_REPO_URL = 'https://raw.githubusercontent.com/vrmatsvr-hub/ursina-city/ma
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERSION_FILE = os.path.join(HERE, 'version.json')
-PROTECTED = {'savegame.json', 'version.json', 'START_GAME.bat', 'start_game.bat'}
+PROTECTED = {'savegame.json', 'version.json', 'START_GAME.bat', 'start_game.bat', 'UPDATE.bat', 'update.bat'}
 ALLOWED_EXT = ('.py', '.md', '.txt', '.json')
 
 
@@ -127,4 +127,24 @@ def run(relaunch=True):
 
 
 if __name__ == '__main__':
-    run(relaunch=False)
+    # exit codes for UPDATE.bat:  0 = already up to date, 10 = updated, 2 = could not check / failed
+    if 'OWNER/' in repo_url():
+        print('[updater] no GitHub repository configured.')
+        sys.exit(2)
+    print('[updater] local version', local_version(), '- checking', repo_url())
+    try:
+        remote_info = json.loads(_get(repo_url() + '/version.json?nocache=1', 6.0))
+    except Exception as ex:
+        print('[updater] could not reach GitHub:', ex)
+        sys.exit(2)
+    print('[updater] newest version on GitHub:', remote_info.get('version'))
+    if _parse(remote_info.get('version', '0')) <= _parse(local_version()):
+        print('[updater] you already have the newest version.')
+        sys.exit(0)
+    try:
+        n = apply(remote_info)
+    except Exception as ex:
+        print('[updater] update failed, nothing was changed:', ex)
+        sys.exit(2)
+    print('[updater] updated %d files -> v%s (savegame.json kept)' % (n, remote_info['version']))
+    sys.exit(10)

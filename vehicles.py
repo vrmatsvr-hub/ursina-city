@@ -795,7 +795,14 @@ class TwoWheeler(Vehicle):
         self.lean = 0.0
         self.boost_active = False
         self.model_ents = []
-        self.lean_pivot = Entity(parent=self.root)
+        # wheelie: the whole bike pivots around the rear contact patch
+        self.wheelie = 0.0              # degrees nose-up
+        self.wheelie_w = 0.0            # deg / s
+        self.wheelie_key = False
+        self.wheelie_time = 0.0
+        self.lying = False              # fell over - lies on its side until someone picks it up
+        self.wheelie_pivot = Entity(parent=self.root)
+        self.lean_pivot = Entity(parent=self.wheelie_pivot)
         self.body = Entity(parent=self.lean_pivot)
         self.seat = Entity(parent=self.body)
         self.fork = Entity(parent=self.lean_pivot)
@@ -879,6 +886,8 @@ class TwoWheeler(Vehicle):
         acc = ACCENT_COLORS[self.accent][1]
         ch, fk, hd, r, wb, seat_y, seat_z = build_two_wheeler(self.kind, prim, acc)
         self.wheel_r, self.wheelbase = r, wb
+        self.wheelie_pivot.position = (0, 0, -wb / 2)
+        self.lean_pivot.position = (0, 0, wb / 2)
         self.seat_y, self.seat_z = seat_y, seat_z
         e = ch.entity(parent=self.body)
         self.model_ents.append(e)
@@ -925,10 +934,81 @@ class TwoWheeler(Vehicle):
         if rider is not None:
             rider.parent = self.seat
 
+    # ---- manual wheelie (CTRL): no auto-balance, the rider has to feather it
+    BALANCE = 74.0          # balance point in degrees: beyond it the bike flips over backwards
+    GRAVITY = 260.0
+    LIFT = 520.0
+
+    def update(self, dt):
+        if self.remote:
+            t = self.net_target
+            if t is not None:
+                self.wheelie += (t.get('wh', 0.0) - self.wheelie) * min(1.0, dt * 12)
+            super().update(dt)
+            return
+        self._wheelie(dt)
+        if self.wheelie > 10:
+            self.steer *= 0.45                  # hard to steer on the back wheel
+        super().update(dt)
+
+    def _wheelie(self, dt):
+        rider = self.driver == 'player'
+        lift_on = (rider and self.wheelie_key and not self.airborne and not self.frozen
+                   and self.speed > 1.5 and self.battery_wh > 0)
+        if self.wheelie <= 0.0 and not lift_on:
+            self.wheelie = 0.0
+            self.wheelie_w = 0.0
+            self._bank_wheelie()
+            return
+        torque = -self.GRAVITY * math.cos(math.radians(self.wheelie + (90.0 - self.BALANCE)))
+        if lift_on:
+            power = clampf(self.accel_value() / 6.0, 0.75, 1.9)
+            torque += self.LIFT * (0.55 + 0.45 * max(0.0, self.throttle)) * power
+        if self.handbrake:
+            torque -= 380.0                     # rear brake drops the front wheel
+        if not rider:
+            torque -= 200.0
+        torque -= self.wheelie_w * 1.2
+        self.wheelie_w += torque * dt
+        self.wheelie += self.wheelie_w * dt
+        if self.wheelie <= 0.0:
+            if self.wheelie_w < -60:
+                self.susp_v -= min(2.5, -self.wheelie_w / 120.0)
+                self.game.sound.play('thud', min(0.8, -self.wheelie_w / 300.0), 1.3, (self.x, self.y, self.z), 12)
+            self.wheelie = 0.0
+            self.wheelie_w = 0.0
+            self._bank_wheelie()
+        elif rider and self.wheelie > 20:
+            self.wheelie_time += dt
+        if self.wheelie > 88.0:
+            self.fall_over()
+
+    def _bank_wheelie(self):
+        if self.wheelie_time > 1.5 and self.driver == 'player':
+            cash = int(self.wheelie_time * 12)
+            self.game.player.add_cash(cash, 'WHEELIE %.1fs' % self.wheelie_time)
+        self.wheelie_time = 0.0
+
+    def fall_over(self):
+        """Looped the wheelie: rider is thrown off, bike crashes onto its side."""
+        self.wheelie = 0.0
+        self.wheelie_w = 0.0
+        self.wheelie_time = 0.0
+        self.lying = True
+        self.game.sound.play('thud', 0.9, 0.9, (self.x, self.y, self.z))
+        self.game.sound.play('scrape', 0.7, 1.0, (self.x, self.y, self.z))
+        if self.driver == 'player':
+            self.game.player.crash_off_bike(self)
+        self.vx *= 0.4
+        self.vz *= 0.4
+
     def update_visuals(self, dt):
         self.root.position = (self.x, self.y, self.z)
         self.root.rotation_y = self.heading
-        if self.driver is None and self.speed < 0.3:
+        self.wheelie_pivot.rotation_x = -self.wheelie
+        if self.lying and self.driver is None:
+            lean_t = 80.0                       # lying on its side after a crash
+        elif self.driver is None and self.speed < 0.3:
             lean_t = -9.0                       # resting on its kickstand
         else:
             w = math.radians(self.yaw_rate)

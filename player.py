@@ -100,6 +100,9 @@ class Player:
         v.driver = 'player'
         v.ai = None
         v.wake()
+        if v.is_two_wheeler:
+            v.lying = False
+            v.wheelie = v.wheelie_w = 0.0
         v.throttle = v.steer = 0.0
         v.handbrake = False
         self.vehicle = v
@@ -159,6 +162,18 @@ class Player:
         if speed > 8.0:
             self.knock(v.vx * 0.5, 2.5, v.vz * 0.5)
             self.damage(speed * 0.8)
+
+    def crash_off_bike(self, v):
+        """Thrown off backwards after looping a wheelie."""
+        (fx, fz), _ = heading_vectors(v.heading)
+        sp = v.speed
+        self.exit_vehicle()
+        self.pos = Vec3(v.x - fx * 1.1, self.pos.y, v.z - fz * 1.1)
+        self.state = 'foot'
+        self.knock(-fx * 3.0 + v.vx * 0.4, 3.5, -fz * 3.0 + v.vz * 0.4)
+        self.damage(8.0 if sp > 8.0 else 12.0)
+        self.game.camera_rig.shake(0.6)
+        self.game.hud.notify('You flipped the wheelie!  Feather CTRL to hold the balance point.', rgb(255, 120, 90))
 
     # ---- death / arrest
     def _go_down(self, state, text, loss):
@@ -343,6 +358,8 @@ class Player:
         v.throttle = thr
         v.handbrake = bool(held_keys['space']) and ctrl
         v.boost = bool(held_keys['left shift'] or held_keys['shift']) and ctrl
+        if v.is_two_wheeler:
+            v.wheelie_key = bool(held_keys['control'] or held_keys['left control'] or held_keys['right control']) and ctrl
         v.horn = bool(held_keys['h']) and ctrl
         self.pos = Vec3(v.x, v.y, v.z)
         if v.is_two_wheeler:
@@ -640,6 +657,7 @@ class HUD:
             'SPACE  jump / handbrake (drift!)   MOUSE  look',
             'E  enter / steal / carjack / exit / interact',
             'B  buy a snack in a Winkel       H  horn     R  reset vehicle',
+            'CTRL  wheelie on scooters / KuKirin / e-motorbike - no auto-balance, feather it!',
             'Q  re-open the tuning menu while parked on the E-Tuning pad',
             'V  first / third person          T  toggle day / night',
             'LEFT CLICK  throw firework       TAB (hold)  weapon wheel',
@@ -754,11 +772,19 @@ class HUD:
             self.bat_bg.enabled = self.bat_bar.enabled = False
         d = g.vehicles.drift
         dtxt = ('DRIFT  %d   x%d' % (int(d.points), d.mult)) if d.active and d.points > 20 else ''
+        if v is not None and v.is_two_wheeler and v.wheelie > 1.0:
+            dtxt = 'WHEELIE  %d deg   %.1fs' % (v.wheelie, v.wheelie_time)
         if self.drift_txt.text != dtxt:
             self.drift_txt.text = dtxt
         show_meter = bool(dtxt)
         self.drift_bg.enabled = self.drift_bar.enabled = show_meter
-        if show_meter:
+        if show_meter and v is not None and v.is_two_wheeler and v.wheelie > 1.0:
+            k = v.wheelie / 88.0                      # full bar = flipping over
+            self.drift_bar.scale_x = 0.3 * clampf(k, 0, 1)
+            bal = v.BALANCE
+            self.drift_bar.color = (rgb(255, 60, 40) if v.wheelie > bal - 4 else
+                                    rgb(120, 255, 120) if v.wheelie > bal - 30 else rgb(255, 200, 60))
+        elif show_meter:
             self.drift_bar.scale_x = 0.3 * d.meter()
             self.drift_bar.color = rgb(255, 80, 40) if d.mult >= 5 else rgb(255, 200, 60)
         nt = g.net.hud_text() if g.net is not None else ''

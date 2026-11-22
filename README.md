@@ -6,6 +6,7 @@ time trials and LAN / direct-IP multiplayer with public and private rooms.
 
 **Windows:** download the repo (Code -> Download ZIP), unzip, double-click `START_GAME.bat`.
 It installs Python + libraries if needed and auto-updates from this repository on every start.
+`UPDATE.bat` only checks GitHub and updates the files in your current folder in place (no new ZIP needed).
 
 ## Install & run
     pip install ursina numpy
@@ -35,6 +36,7 @@ Python 3.10+ recommended. All models, shaders and sounds are generated on startu
     E enter/steal/carjack/exit/interact, B buy snack, Q reopen tuning menu
     V camera, T day/night, LMB throw firework, TAB weapon wheel, 1/2/3 select
     H horn, R reset vehicle, F1 controls, ESC pause
+    CTRL wheelie on two-wheelers (no auto-balance - feather CTRL, SPACE brings the front down)
     F9 one-time +5,000 coin bonus (remembered in savegame.json - delete that file to reset)
 
 ## Ways to earn money

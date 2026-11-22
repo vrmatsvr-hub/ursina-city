@@ -539,6 +539,7 @@ class NetSession:
                   'hb': 1 if v.handbrake else 0}
             if v.is_two_wheeler:
                 vs['pr'], vs['ac'] = v.primary, v.accent
+                vs['wh'] = round(v.wheelie, 1)
             else:
                 vs['c'] = [round(c, 3) for c in v.color]
             st['v'] = vs

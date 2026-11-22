@@ -39,7 +39,7 @@ from ursina import *
 
 SAVE_FILE = os.path.join(HERE, 'savegame.json')
 VERSION_FILE = os.path.join(HERE, 'version.json')
-DEFAULT_SETTINGS = {'sens': 40, 'volume': 80, 'fov': 72, 'draw': 1, 'fullscreen': 0, 'name': 'Player', 'last_ip': ''}
+DEFAULT_SETTINGS = {'sens': 40, 'volume': 80, 'fov': 72, 'draw': 1, 'gfx': 1, 'fullscreen': 0, 'name': 'Player', 'last_ip': ''}
 
 
 def load_save():
@@ -65,6 +65,20 @@ def read_version():
     except Exception:
         return '1.0.0'
 
+
+# Graphics quality LOW / MEDIUM / HIGH: what it changes
+GFX_LIGHTS = (4, 8, 16)          # point lights computed per pixel
+GFX_CULL_CARS = (85, 130, 220)   # cars further away than this are hidden
+GFX_CULL_PEDS = (70, 105, 160)   # same for people
+GFX_TRAFFIC = (7, 10, 13)        # moving traffic cars   (needs a restart)
+GFX_PEDS = (16, 24, 30)          # pedestrians           (needs a restart)
+_boot_gfx = int(load_save().get('settings', {}).get('gfx', DEFAULT_SETTINGS['gfx']))
+try:
+    from panda3d.core import loadPrcFileData
+    if _boot_gfx <= 1:           # no anti-aliasing on LOW / MEDIUM - big win on laptops
+        loadPrcFileData('', 'framebuffer-multisample 0\nmultisamples 0')
+except Exception:
+    pass
 
 try:
     app = Ursina(title='Ursina City', borderless=False, vsync=True, development_mode=False)
@@ -143,9 +157,10 @@ class Game(Entity):
         self.hud = HUD(self)
         print('[city] spawning vehicles, people and traffic ...')
         self.vehicles = VehicleManager(self)
-        self.npcs = PedManager(self)
+        gq = int(self.settings.get('gfx', 1))
+        self.npcs = PedManager(self, count=GFX_PEDS[gq])
         self.player = Player(self)
-        self.traffic = TrafficManager(self)
+        self.traffic = TrafficManager(self, count=GFX_TRAFFIC[gq])
         self.wanted = WantedSystem(self)
         self.fireworks = FireworksSystem(self)
         self.shops = ShopSystem(self)
@@ -157,6 +172,24 @@ class Game(Entity):
         self.apply_settings()
         self.enter_main_menu()
         print('[city] ready.')
+
+    # ---- automatic lag fix: drop the graphics quality once if the FPS stays low
+    def _auto_quality(self, raw_dt):
+        st = self.settings
+        if not st.get('gfx_auto', 1) or st.get('gfx', 1) <= 0 or self.paused or self.menu is not None:
+            self.lag_t = 0.0
+            return
+        if raw_dt <= 0:
+            return
+        self.fps_avg = getattr(self, 'fps_avg', 60.0) * 0.97 + (1.0 / raw_dt) * 0.03
+        self.lag_t = getattr(self, 'lag_t', 0.0) + raw_dt if self.fps_avg < 28 else 0.0
+        if self.lag_t > 6.0:
+            self.lag_t = 0.0
+            self.fps_avg = 45.0
+            st['gfx'] -= 1
+            self.apply_settings()
+            self.hud.notify('Lag detected - Graphics quality lowered to %s (change it in Settings)'
+                            % ('LOW', 'MEDIUM', 'HIGH')[st['gfx']], rgb(255, 210, 90), 6.0)
 
     # ---- progress (money, fireworks, businesses) survives closing the game
     def save_progress(self):
@@ -206,6 +239,11 @@ class Game(Entity):
         self.sound.master = st['volume'] / 100.0
         self.world.fog_scale = (1.7, 1.0, 0.6)[st['draw']]
         camera.clip_plane_far = (520, 1100, 1600)[st['draw']]
+        gq = int(st.get('gfx', 1))
+        self.world.lights.set_quality(GFX_LIGHTS[gq])
+        self.vehicles.cull_dist = GFX_CULL_CARS[gq]
+        self.npcs.cull_dist = GFX_CULL_PEDS[gq]
+        self.vehicles.cull(0.0, force=True)
         try:
             if bool(window.fullscreen) != bool(st['fullscreen']):
                 window.fullscreen = bool(st['fullscreen'])
@@ -394,6 +432,7 @@ class Game(Entity):
             if self.net is not None:
                 self.net.update(dt)          # keep the connection alive while paused
             return
+        self._auto_quality(time.dt)
         self.autosave_t += dt
         if self.autosave_t > 20.0:
             self.autosave_t = 0.0

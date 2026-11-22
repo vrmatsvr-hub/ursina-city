@@ -184,6 +184,7 @@ uniform float fog_density;
 uniform float emissive;
 uniform vec4 lights[16];
 uniform vec4 light_colors[16];
+uniform float light_count;
 in vec3 v_normal;
 in vec4 v_color;
 in vec3 v_world;
@@ -197,6 +198,7 @@ void main() {
     float hemi = dot(n, up_dir) * 0.5 + 0.5;
     vec3 light = mix(ground_color, ambient_color, hemi) + sun_color * ndl;
     for (int i = 0; i < 16; i++) {
+        if (float(i) >= light_count) break;
         float r = lights[i].w;
         if (r > 0.01) {
             vec3 d = lights[i].xyz - v_world;
@@ -556,7 +558,12 @@ class LightManager:
         self.col = PTA_LVecBase4f.emptyArray(self.SLOTS)
         self.flashes = []
         self.frame = []
+        self.active = self.SLOTS            # lowered by the Graphics setting
         self._push()
+
+    def set_quality(self, n):
+        self.active = max(2, min(self.SLOTS, int(n)))
+        scene.setShaderInput('light_count', float(self.active))
 
     def flash(self, pos, rgbv, radius, duration):
         self.flashes.append([pos[0], pos[1], pos[2], rgbv, radius, 0.0, duration])
@@ -577,8 +584,8 @@ class LightManager:
         self.flashes = keep
         entries.extend(self.frame[:6])
         self.frame = []
-        entries = entries[:9]
-        remaining = self.SLOTS - len(entries)
+        entries = entries[:min(9, self.active)]
+        remaining = self.active - len(entries)
         if candidates and remaining > 0:
             cx, cy, cz = cam_pos[0], cam_pos[1], cam_pos[2]
             entries.extend(heapq.nsmallest(remaining, candidates,
@@ -1392,6 +1399,7 @@ class World:
             scene.setShaderInput(name, z3)
         scene.setShaderInput('up_dir', self.gpu.vec((0, 1, 0)))
         scene.setShaderInput('fog_density', 0.004)
+        scene.setShaderInput('light_count', 16.0)
 
     # ------------------------------------------------------------ geometry queries
     def lot_rect(self, i, j):

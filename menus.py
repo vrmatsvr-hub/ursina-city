@@ -197,6 +197,7 @@ class SettingsMenu(Screen):
             ('Mouse sensitivity', '%d' % st['sens'], 'sens', 5, 10, 100),
             ('Master volume', '%d%%' % st['volume'], 'volume', 10, 0, 100),
             ('Field of view', '%d' % st['fov'], 'fov', 5, 60, 95),
+            ('Graphics quality', ('LOW', 'MEDIUM', 'HIGH')[st.get('gfx', 1)], 'gfx', 1, 0, 2),
             ('Draw distance', ('LOW', 'MEDIUM', 'HIGH')[st['draw']], 'draw', 1, 0, 2),
             ('Fullscreen', 'ON' if st['fullscreen'] else 'OFF', 'fullscreen', 1, 0, 1),
         )
@@ -206,11 +207,15 @@ class SettingsMenu(Screen):
             menu_button(ui, '-', -R + 0.55, y, 0.05, 0.05, lambda k=key, s=-step, a=lo, b=hi: self.change(k, s, a, b))
             Text(text=val, parent=ui, position=(-R + 0.665, y), origin=(0, 0), scale=1.15, color=ACCENT, z=-0.1)
             menu_button(ui, '+', -R + 0.78, y, 0.05, 0.05, lambda k=key, s=step, a=lo, b=hi: self.change(k, s, a, b))
-        menu_button(ui, 'BACK', -R + 0.29, -0.28, 0.42, 0.065, self.game.back_to_main)
+        menu_button(ui, 'BACK', -R + 0.29, -0.3, 0.42, 0.065, self.game.back_to_main)
+        Text(text='Laggy?  Set Graphics quality to LOW.  Traffic and people amount\nchange after a restart.',
+             parent=ui, position=(-R + 0.08, -0.37), origin=(-0.5, 0.5), scale=0.85, color=FONT_DIM, z=-0.1)
 
     def change(self, key, step, lo, hi):
         st = self.game.settings
-        st[key] = int(clampf(st[key] + step, lo, hi))
+        st[key] = int(clampf(st.get(key, lo) + step, lo, hi))
+        if key == 'gfx':
+            st['gfx_auto'] = 0           # you picked it yourself - stop auto-lowering
         self.game.apply_settings()
         self.game.sound.play('blip', 0.5)
         self.build()

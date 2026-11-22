@@ -323,6 +323,7 @@ def build_two_wheeler(kind, primary, accent):
 
 # ------------------------------------------------------------------ base vehicle
 class Vehicle:
+    culled = False                      # hidden because it is far from the camera
     is_two_wheeler = False
     is_ev = False
     kind = 'car'
@@ -727,6 +728,8 @@ class Car(Vehicle):
         self.driver_ent.enabled = on
 
     def update_visuals(self, dt):
+        if self.culled:
+            return
         self.root.position = (self.x, self.y, self.z)
         self.root.rotation_y = self.heading
         self.body.y = self.susp
@@ -1008,6 +1011,8 @@ class TwoWheeler(Vehicle):
         self.vz *= 0.4
 
     def update_visuals(self, dt):
+        if self.culled:
+            return
         self.root.position = (self.x, self.y, self.z)
         self.root.rotation_y = self.heading
         self.wheelie_pivot.rotation_x = -self.wheelie
@@ -1091,6 +1096,8 @@ class VehicleManager:
         self.game = game
         self.world = game.world
         self.list = []
+        self.cull_dist = 140.0
+        self.cull_t = 0.0
         self.drift = DriftScore(game)
         snd = game.sound
         self.engine_loop = snd.loop('engine_car')
@@ -1217,7 +1224,26 @@ class VehicleManager:
                                 self.drift.crash()
                     return
 
+    def cull(self, dt, force=False):
+        """Hide cars that are far from the camera - fewer draw calls, no animation work."""
+        self.cull_t -= dt
+        if self.cull_t > 0 and not force:
+            return
+        self.cull_t = 0.2
+        cam = camera.world_position
+        cx, cz = cam.x, cam.z
+        d2 = self.cull_dist * self.cull_dist
+        pv = self.game.player.vehicle
+        for v in self.list:
+            far = (v.x - cx) ** 2 + (v.z - cz) ** 2 > d2 and v is not pv
+            if far != v.culled:
+                v.culled = far
+                v.root.enabled = not far
+                if not far:
+                    v.update_visuals(0.0)
+
     def update(self, dt):
+        self.cull(dt)
         for v in self.list:
             if v.ai is not None:
                 v.ai.update(dt)

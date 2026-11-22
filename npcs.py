@@ -365,7 +365,9 @@ class Pedestrian:
         if st != 'down':
             gh = w.ground_height(self.x, self.z)
             self.y += (gh - self.y) * min(1.0, dt * 15)
-        # visuals
+        # visuals (skipped while hidden far away)
+        if getattr(self, 'culled', False):
+            return
         r = self.h.root
         r.position = (self.x, self.y + 0.12 * self.fall, self.z)
         r.rotation_y = self.yaw
@@ -431,6 +433,7 @@ class PedManager:
         self.game = game
         self.world = game.world
         self.peds = []
+        self.cull_dist = 120.0
         self.max_peds = count + 8
         for _ in range(count):
             lot = (random.randrange(N_BLOCKS), random.randrange(N_BLOCKS))
@@ -481,9 +484,15 @@ class PedManager:
         cam = camera.world_position
         game = self.game
         player = game.player
+        cd2 = self.cull_dist * self.cull_dist
+        ad2 = min(95.0, self.cull_dist * 0.75) ** 2
         for p in self.peds:
-            near = (p.x - cam.x) ** 2 + (p.z - cam.z) ** 2 < 95 * 95
-            p.update(dt, near)
+            d2 = (p.x - cam.x) ** 2 + (p.z - cam.z) ** 2
+            far = d2 > cd2
+            if far != getattr(p, 'culled', False):
+                p.culled = far
+                p.h.root.enabled = not far
+            p.update(dt, d2 < ad2)
         for c in self.clerks:
             c.update(dt)
         self.dealer.update(dt)

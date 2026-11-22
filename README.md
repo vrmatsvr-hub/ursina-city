@@ -13,7 +13,7 @@ throw heavy fireworks and play with friends using just a room code.
 ![Version](https://img.shields.io/badge/version-1.3.0-brightgreen)
 ![Multiplayer](https://img.shields.io/badge/multiplayer-room%20codes-blueviolet)
 
-<img src="docs/main_menu.jpg" alt="Main menu over the city at dusk" width="900">
+<img src="docs/ursina_city_20261122_105214.png" alt="Main menu over the city at dusk" width="900">
 
 </div>
 
@@ -23,12 +23,12 @@ throw heavy fireworks and play with friends using just a room code.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/fireworks.jpg" alt="Cobra 6 exploding in the park"><br><sub><b>Fireworks</b> - a Cobra 6 goes off in the park, with flash, shockwave and smoke.</sub></td>
-    <td width="50%"><img src="docs/night_city.jpg" alt="The city at night"><br><sub><b>Day / night cycle</b> - windows and streetlights light up when the sun goes down.</sub></td>
+    <td width="50%"><img src="docs/ursina_city_20261122_105227.png" alt="Cobra 6 exploding in the park"><br><sub><b>Fireworks</b> - a Cobra 6 goes off in the park, with flash, shockwave and smoke.</sub></td>
+    <td width="50%"><img src="docs/ursina_city_20261122_105339.png" alt="The city at night"><br><sub><b>Day / night cycle</b> - windows and streetlights light up when the sun goes down.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/kukirin_ride.jpg" alt="Riding the KuKirin G2"><br><sub><b>KuKirin G2</b> - a standing e-scooter you can tune and wheelie.</sub></td>
-    <td width="50%"><img src="docs/main_menu.jpg" alt="Main menu"><br><sub><b>Live main menu</b> - the camera flies over the city while traffic drives and fireworks pop.</sub></td>
+    <td width="50%"><img src="docs/ursina_city_20261122_105442.png" alt="KuKirin G2 wheelie"><br><sub><b>KuKirin G2</b> - a standing e-scooter you can tune and pull wheelies on.</sub></td>
+    <td width="50%"><img src="docs/ursina_city_20261122_105214.png" alt="Main menu"><br><sub><b>Live main menu</b> - the camera flies over the city while traffic drives and fireworks pop.</sub></td>
   </tr>
 </table>
 

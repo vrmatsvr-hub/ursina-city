@@ -706,6 +706,31 @@ def synth_sounds():
         crackle[p:p + 200] += _noise(200) * np.exp(-np.arange(200) / 25.0) * np.random.uniform(0.3, 1.0)
     _write_wav('scream', _fade(whistle * env + hiss + crackle * 0.5, 0.01, 0.03), 0.9)
 
+    # scream 100 (new): a clean 10 second rising, oscillating whistle with fountain crackle
+    t, n = _t(10.0)
+    rise = (t / t[-1]) ** 0.8
+    f = 1500 + 2600 * rise + (120 + 160 * rise) * np.sin(2 * np.pi * (5.0 + 4.0 * rise) * t)
+    ph = 2 * np.pi * np.cumsum(f) / SR
+    whistle = np.sin(ph) + 0.3 * np.sin(2 * ph) + 0.08 * np.sin(3 * ph)
+    env = np.minimum(t / 0.08, 1.0) * (0.7 + 0.3 * rise) * (0.88 + 0.12 * np.sin(2 * np.pi * 11 * t))
+    hiss = _np_norm(_bandpass(_noise(n), 2500, 9000)) * 0.18
+    crackle = np.zeros(n)
+    for _ in range(700):
+        p = np.random.randint(0, n - 200)
+        crackle[p:p + 200] += _noise(200) * np.exp(-np.arange(200) / 22.0) * np.random.uniform(0.2, 0.9)
+    _write_wav('scream10', _fade(whistle * env + hiss + crackle * 0.35, 0.02, 0.04), 0.92)
+
+    # spark fountain sizzle (Cobra 6 pre-blast, no whistle)
+    t, n = _t(3.2)
+    fs = _np_norm(_bandpass(_noise(n), 1800, 11000)) * 0.5 * (0.8 + 0.2 * np.sin(2 * np.pi * 6 * t))
+    for _ in range(420):
+        p = np.random.randint(0, n - 300)
+        fs[p:p + 300] += _noise(300) * np.exp(-np.arange(300) / 35.0) * np.random.uniform(0.3, 1.2)
+    _write_wav('fountain', _fade(fs, 0.02, 0.05), 0.75)
+
+    # the big bang both fireworks use: deeper, longer sub-bass
+    _write_wav('bang_mega', synth_bang(4.0, 700, 44, 0.3, tail=2.0, crack=1.4))
+
     # fuse: hiss and crackle
     t, n = _t(1.9)
     fz = _np_norm(_highpass(_noise(n), 3500)) * 0.35 * (0.7 + 0.3 * np.sin(2 * np.pi * 3 * t))
@@ -804,10 +829,10 @@ def synth_sounds():
     _write_wav('scrape', _fade(sp), 0.5)
 
     with open(os.path.join(SOUND_DIR, 'version.txt'), 'w') as f:
-        f.write('3')
+        f.write('4')
 
 
-SOUND_NAMES = ('bang_cobra', 'bang_scream', 'scream', 'fuse', 'engine_car', 'engine_ev', 'skid', 'siren',
+SOUND_NAMES = ('bang_cobra', 'bang_scream', 'bang_mega', 'scream', 'scream10', 'fountain', 'fuse', 'engine_car', 'engine_ev', 'skid', 'siren',
                'alarm', 'cash', 'buy', 'error', 'thud', 'horn', 'whoosh', 'step', 'blip', 'scrape')
 
 
@@ -816,7 +841,7 @@ def ensure_sounds():
         print('[audio] numpy not installed -> no sound. Run:  pip install numpy')
         return False
     vf = os.path.join(SOUND_DIR, 'version.txt')
-    ok = os.path.exists(vf) and open(vf).read().strip() == '3' and all(
+    ok = os.path.exists(vf) and open(vf).read().strip() == '4' and all(
         os.path.exists(os.path.join(SOUND_DIR, n + '.wav')) for n in SOUND_NAMES)
     if not ok:
         print('[audio] synthesizing sound effects ...')
@@ -859,7 +884,7 @@ class SoundBank:
         try:
             if self.base is not None and ensure_sounds():
                 for name in SOUND_NAMES:
-                    copies = 4 if name in ('bang_cobra', 'bang_scream', 'thud', 'step', 'cash', 'fuse', 'scream') else 2
+                    copies = 4 if name in ('bang_cobra', 'bang_scream', 'bang_mega', 'thud', 'step', 'cash', 'fuse', 'scream', 'scream10', 'fountain') else 2
                     self.pools[name] = [self._load(name) for _ in range(copies)]
                     self.index[name] = 0
                 self.enabled = True
@@ -988,8 +1013,8 @@ class ParticlePool:
 class Particles:
     def __init__(self):
         tex = soft_texture()
-        self.glow = ParticlePool(tex, 260, additive=True)     # sparks, fire, flashes
-        self.smoke = ParticlePool(tex, 220, additive=False)   # smoke, dust
+        self.glow = ParticlePool(tex, 420, additive=True)     # sparks, fire, flashes, fountains
+        self.smoke = ParticlePool(tex, 320, additive=False)   # smoke, dust, lingering blast clouds
 
     def spark(self, pos, vel, life=0.5, size=0.12, col=None, grav=9.0):
         c = col if col is not None else Color(1.0, 0.75, 0.3, 1.0)
@@ -1001,8 +1026,8 @@ class Particles:
     def flash(self, pos, size=6.0, life=0.15):
         self.glow.emit(pos, (0, 0, 0), life, size, size * 1.6, Color(1, 0.95, 0.8, 1), Color(1, 0.6, 0.2, 0), 0, 0)
 
-    def smoke_puff(self, pos, vel, life=1.6, s0=0.6, s1=2.6, shade=0.6, alpha=0.5):
-        self.smoke.emit(pos, vel, life, s0, s1, Color(shade, shade, shade, alpha), Color(shade, shade, shade, 0.0), -0.6, 1.2)
+    def smoke_puff(self, pos, vel, life=1.6, s0=0.6, s1=2.6, shade=0.6, alpha=0.5, rise=-0.6, drag=1.2):
+        self.smoke.emit(pos, vel, life, s0, s1, Color(shade, shade, shade, alpha), Color(shade, shade, shade, 0.0), rise, drag)
 
     def update(self, dt):
         self.glow.update(dt)

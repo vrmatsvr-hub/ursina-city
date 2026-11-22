@@ -35,8 +35,8 @@ BTN_BAD = rgb(110, 40, 40)
 
 SLOTS = [('hands', 'Unarmed'), ('cobra6', 'Cobra 6'), ('scream100', 'Scream 100')]
 FIREWORK_INFO = {
-    'cobra6': dict(name='Cobra 6', price=40, pack=5, pack_price=180, desc='Heavy banger. Short fuse, massive bang.'),
-    'scream100': dict(name='Scream 100', price=95, pack=5, pack_price=425, desc='Screams + sparks for 2 s, then a huge bang.'),
+    'cobra6': dict(name='Cobra 6', price=40, pack=5, pack_price=180, desc='Lands upright, 3 s spark fountain, then a massive bang.'),
+    'scream100': dict(name='Scream 100', price=95, pack=5, pack_price=425, desc='Screams for 10 s with a huge fountain, then a massive bang.'),
 }
 
 
@@ -118,119 +118,236 @@ class Menu:
 
 
 # =================================================================== fireworks
+# tiny 3x5 pixel font for the procedural labels
+_PIX = {
+    'S': ('111', '100', '111', '001', '111'), 'C': ('111', '100', '100', '100', '111'),
+    'R': ('110', '101', '110', '101', '101'), 'E': ('111', '100', '110', '100', '111'),
+    'A': ('010', '101', '111', '101', '101'), 'M': ('101', '111', '111', '101', '101'),
+    'O': ('111', '101', '101', '101', '111'), 'B': ('110', '101', '110', '101', '110'),
+    '1': ('010', '110', '010', '010', '111'), '0': ('111', '101', '101', '101', '111'),
+    '6': ('111', '100', '111', '101', '111'), ' ': ('000', '000', '000', '000', '000'),
+}
+
+
+def _wrap_px(mb, r, ang, y, w_ang, h, col):
+    """One label 'pixel' lying on the surface of a cylinder (radius r) at angle ang (deg) and height y."""
+    a0, a1 = math.radians(ang - w_ang / 2), math.radians(ang + w_ang / 2)
+    am = (a0 + a1) / 2
+    p = lambda a, yy: (math.sin(a) * r, yy, math.cos(a) * r)
+    n = (math.sin(am), 0.0, math.cos(am))
+    mb.quad(p(a0, y - h / 2), p(a1, y - h / 2), p(a1, y + h / 2), p(a0, y + h / 2), n, col)
+
+
+def _wrap_text(mb, text, r, ang0, y0, px, col, slant=0.0, vertical=False):
+    """Pixel text wrapped onto a cylinder. Horizontal: left->right across the front.
+    Vertical: runs up the length of the body (letters rotated 90 deg)."""
+    w_ang = math.degrees(px / r)
+    cx = 0
+    for ch in text:
+        g = _PIX.get(ch, _PIX[' '])
+        for row in range(5):
+            for col_i in range(3):
+                if g[row][col_i] != '1':
+                    continue
+                if vertical:
+                    # letter rows go around the body, letter columns go up the body
+                    yy = y0 + (cx + col_i) * px
+                    aa = ang0 + (row - 2) * w_ang
+                else:
+                    aa = ang0 + (cx + col_i) * w_ang
+                    yy = y0 - row * px + (cx + col_i) * px * slant
+                _wrap_px(mb, r, aa, yy, w_ang * 1.02, px * 1.02, col)
+        cx += 4
+
+
+def build_firework_model(kind):
+    """Procedural 3D models. Origin = centre of the bottom, so it stands on the ground."""
+    mb = MeshBuilder()
+    black = rgb(16, 16, 18)
+    paper = rgb(28, 28, 30)
+    fuse_g = rgb(40, 190, 60)
+    white = rgb(240, 240, 240)
+    red = rgb(220, 24, 30)
+    if kind == 'scream100':
+        R, H = 0.11, 0.34
+        mb.cylinder((0, H / 2, 0), R, H, black, seg=20)
+        # crinkled, tapered paper neck
+        neck = [(0.105, 0.02), (0.092, 0.02), (0.098, 0.018), (0.078, 0.018), (0.084, 0.016), (0.062, 0.016),
+                (0.068, 0.014), (0.046, 0.014), (0.05, 0.012), (0.034, 0.016)]
+        y = H
+        for k, (rr, hh) in enumerate(neck):
+            nxt = neck[k + 1][0] if k + 1 < len(neck) else 0.028
+            mb.cylinder((0, y + hh / 2, 0), rr, hh, paper if k % 2 else black, seg=14, radius_top=nxt)
+            y += hh
+        mb.cylinder((0, y + 0.006, 0), 0.03, 0.012, black, seg=10)
+        mb.cylinder((0.004, y + 0.05, 0), 0.0055, 0.09, fuse_g, seg=6)       # green visco fuse
+        top = y + 0.1
+        # label on the front: jagged sound-wave band, slanted SCREAM, red 100
+        rl = R + 0.0015
+        px = 0.0105
+        for k in range(26):
+            a = -66 + k * 5.2
+            hgt = 0.012 + 0.022 * abs(math.sin(k * 1.3)) * (0.5 + 0.5 * math.sin(k * 0.7))
+            _wrap_px(mb, rl, a, H - 0.045, 4.6, hgt, white)
+        _wrap_text(mb, 'SCREAM', rl, -62, H - 0.1, px, white, slant=0.32)
+        _wrap_text(mb, '100', rl, -22, 0.105, px * 1.6, red)
+        _wrap_px(mb, rl, 0, 0.028, 120, 0.006, red)
+        return mb.entity(), top
+    # cobra 6
+    R, H = 0.068, 0.26
+    mb.cylinder((0, H / 2, 0), R, H, black, seg=16)
+    mb.cylinder((0, H + 0.03, 0), R, 0.06, paper, seg=14, radius_top=0.022)    # tapered paper top
+    mb.cylinder((0.003, H + 0.1, 0), 0.0048, 0.085, fuse_g, seg=6)
+    top = H + 0.14
+    rl = R + 0.0015
+    px = 0.0072
+    _wrap_text(mb, 'COBRA 6', rl, 0, 0.03, px, red, vertical=True)              # red name up the length
+    # white zig-zag accent next to the name
+    for k in range(9):
+        _wrap_px(mb, rl, 40 + (8 if k % 2 else -8) * 0.5, 0.04 + k * 0.023, 9, 0.026, white)
+    # green rings around the bottom
+    for yy in (0.012, 0.024):
+        _wrap_px(mb, rl, 0, yy, 359, 0.006, fuse_g)
+    return mb.entity(), top
+
+
 class Firework:
-    def __init__(self, system, kind, pos, vel):
+    """Thrown in an arc, lands and stands upright, then:
+    Scream 100: 10 s rising scream + huge titanium fountain, then a massive bang.
+    Cobra 6:    3 s sizzling spark fountain (no scream), then the same massive bang."""
+    FOUNTAIN = {'scream100': 10.0, 'cobra6': 3.0}
+
+    def __init__(self, system, kind, pos, vel, fid=None):
         self.sys = system
         self.game = system.game
         self.kind = kind
-        mb = MeshBuilder()
-        if kind == 'cobra6':
-            mb.cylinder((0, 0, 0), 0.06, 0.22, rgb(210, 20, 30), seg=10)
-            mb.cylinder((0, 0.02, 0), 0.062, 0.06, rgb(250, 210, 30), seg=10, caps=False)
-            mb.cylinder((0, 0.115, 0), 0.04, 0.02, rgb(40, 40, 40), seg=8)
-            mb.cylinder((0, 0.16, 0), 0.008, 0.08, rgb(90, 70, 40), seg=4)
-            self.fuse = 1.8
-        else:
-            mb.cylinder((0, 0, 0), 0.09, 0.28, rgb(20, 70, 200), seg=12)
-            for yy in (-0.08, 0.0, 0.08):
-                mb.cylinder((0, yy, 0), 0.092, 0.025, rgb(240, 240, 240), seg=12, caps=False)
-            mb.cylinder((0, 0.19, 0), 0.09, 0.1, rgb(240, 240, 240), seg=12, radius_top=0.01)
-            self.fuse = 0.8
-        self.e = mb.entity()
+        self.fid = fid
+        self.e, self.top = build_firework_model(kind)
         self.x, self.y, self.z = pos
         self.vx, self.vy, self.vz = vel
+        self.yaw = math.degrees(math.atan2(vel[0], vel[2])) if abs(vel[0]) + abs(vel[2]) > 0.01 else 0.0
+        self.rx = self.rz = 0.0
+        self.spin = (random.uniform(-520, 520), random.uniform(-520, 520))
         self.t = 0.0
-        self.phase = 'fuse'
-        self.rx = self.ry = self.rz = 0.0
-        self.spin = (random.uniform(-600, 600), random.uniform(-600, 600))
+        self.phase = 'flying'
         self.dead = False
-        self.hop_cd = 0.0
+        self.remote = False
         self.alarm_cd = 0.0
-        self.fuse_snd = self.game.sound.play('fuse', 0.7, 1.0, pos, 14)
-        self.scream_snd = None
+        self.emit_acc = 0.0
+        self.loop_snd = None
+        self.loop_t = 0.0
+        self.fuse_snd = self.game.sound.play('fuse', 0.55, 1.0, pos, 12)
+
+    # ---- landing
+    def land(self, x=None, z=None, yaw=None):
+        if self.phase != 'flying':
+            return
+        w = self.game.world
+        if x is not None:
+            self.x, self.z = x, z
+        if yaw is not None:
+            self.yaw = yaw
+        self.y = w.ground_height(self.x, self.z)
+        self.vx = self.vy = self.vz = 0.0
+        self.rx = self.rz = 0.0                       # stands perfectly upright: rotation = (0, yaw, 0)
+        self.phase = 'fountain'
+        self.t = 0.0
+        if self.fuse_snd is not None:
+            self.fuse_snd.stop()
+        p = (self.x, self.y + self.top, self.z)
+        if self.kind == 'scream100':
+            self.loop_snd = self.game.sound.play('scream10', 1.0, 1.0, p, 34)
+        else:
+            self.loop_snd = self.game.sound.play('fountain', 0.9, 1.0, p, 20)
+        self.game.world.particles.smoke_puff((self.x, self.y + 0.1, self.z), (0, 0.4, 0), 1.0, 0.2, 0.8, 0.7, 0.35)
+        if not self.remote and self.game.net is not None and self.fid is not None:
+            self.game.net.send_firework_land(self.fid, (self.x, self.y, self.z), self.yaw)
 
     def update(self, dt):
         w = self.game.world
         self.t += dt
-        self.vy -= 16.0 * dt
-        self.x += self.vx * dt
-        self.y += self.vy * dt
-        self.z += self.vz * dt
-        floor = w.ground_height(self.x, self.z) + 0.07
-        grounded = False
-        if self.y <= floor:
-            self.y = floor
-            grounded = True
-            if self.vy < -2.0:
-                self.vy = -self.vy * 0.35
-            else:
-                self.vy = 0.0
-            f = max(0.0, 1.0 - 4.5 * dt)
-            self.vx *= f
-            self.vz *= f
-        x, z, n = w.collision.resolve_circle(self.x, self.z, 0.1, self.y - 0.1, self.y + 0.1)
-        if n is not None:
-            vn = self.vx * n[0] + self.vz * n[1]
-            if vn < 0:
-                self.vx -= 1.5 * vn * n[0]
-                self.vz -= 1.5 * vn * n[1]
-        self.x, self.z = x, z
-        if grounded:
-            self.rx += (90 - self.rx) * min(1.0, dt * 10)
-            self.rz *= max(0.0, 1.0 - dt * 10)
-        else:
+        if self.phase == 'flying':
+            self.vy -= 16.0 * dt
+            self.x += self.vx * dt
+            self.y += self.vy * dt
+            self.z += self.vz * dt
+            x, z, n = w.collision.resolve_circle(self.x, self.z, 0.1, self.y - 0.1, self.y + 0.1)
+            if n is not None:
+                vn = self.vx * n[0] + self.vz * n[1]
+                if vn < 0:
+                    self.vx -= 1.4 * vn * n[0]
+                    self.vz -= 1.4 * vn * n[1]
+            self.x, self.z = x, z
             self.rx += self.spin[0] * dt
             self.rz += self.spin[1] * dt
-        self.ry += (300 if self.phase == 'scream' else 0) * dt
-        self.e.position = (self.x, self.y, self.z)
-        self.e.rotation = (self.rx, self.ry, self.rz)
-        p = (self.x, self.y + 0.08, self.z)
-        parts = w.particles
-        if self.phase == 'fuse':
-            for _ in range(3):
-                parts.spark(p, (random.uniform(-1.5, 1.5), random.uniform(1.0, 3.0), random.uniform(-1.5, 1.5)), 0.35, 0.07,
-                            Color(1.0, 0.7, 0.25, 1.0), 6.0)
-            if random.random() < 0.2:
-                parts.smoke_puff(p, (0, 0.6, 0), 1.0, 0.15, 0.6, 0.75, 0.3)
-            w.lights.add(p, (1.2, 0.7, 0.3), 4.0)
-            if self.t >= self.fuse:
-                if self.kind == 'cobra6':
-                    self.explode()
+            self.e.position = (self.x, self.y, self.z)
+            self.e.rotation = (self.rx, self.yaw, self.rz)
+            p = (self.x, self.y + 0.1, self.z)
+            if random.random() < 0.7:
+                w.particles.spark(p, (random.uniform(-1, 1), random.uniform(0.5, 2), random.uniform(-1, 1)), 0.25, 0.06,
+                                  Color(1.0, 0.7, 0.25, 1.0), 6.0)
+            w.lights.add(p, (1.0, 0.6, 0.25), 3.0)
+            if (self.y <= w.ground_height(self.x, self.z) and self.vy <= 0) or self.t > 6.0:
+                if not self.remote:
+                    self.land()
                 else:
-                    self.phase = 'scream'
-                    self.t = 0.0
-                    if self.fuse_snd is not None:
-                        self.fuse_snd.stop()
-                    self.scream_snd = self.game.sound.play('scream', 1.0, 1.0, p, 30)
-        elif self.phase == 'scream':
-            k = self.t / 2.0
-            for _ in range(10):
-                c = random.choice((Color(1, 1, 1, 1), Color(0.6, 0.85, 1, 1), Color(1, 0.9, 0.5, 1)))
-                parts.spark(p, (random.uniform(-3, 3), random.uniform(4.0, 9.0) * (0.6 + k), random.uniform(-3, 3)), 0.6, 0.11, c, 9.0)
-            if random.random() < 0.5:
-                parts.smoke_puff(p, (random.uniform(-0.5, 0.5), 1.4, random.uniform(-0.5, 0.5)), 1.6, 0.3, 1.6, 0.85, 0.35)
-            w.lights.add((self.x, self.y + 1.0, self.z), (2.0, 2.0, 2.4), 12.0)
-            self.hop_cd -= dt
-            if self.hop_cd <= 0 and grounded:
-                self.hop_cd = random.uniform(0.15, 0.35)
-                self.vx += random.uniform(-2.5, 2.5)
-                self.vz += random.uniform(-2.5, 2.5)
-                self.vy = random.uniform(1.5, 3.5)
-            self.alarm_cd -= dt
-            if self.alarm_cd <= 0:
-                self.alarm_cd = 0.5
-                self.game.npcs.alarm(p, 25.0, 5.0)
-            if self.t >= 2.0:
-                self.explode()
+                    self.y = w.ground_height(self.x, self.z)
+                    self.land()                        # the thrower's 'landed' message corrects the spot
+            return
+        if self.phase != 'fountain':
+            return
+        # standing upright on the ground
+        self.e.position = (self.x, self.y, self.z)
+        self.e.rotation = (0, self.yaw, 0)
+        dur = self.FOUNTAIN[self.kind]
+        k = min(1.0, self.t / dur)
+        top = (self.x, self.y + self.top, self.z)
+        P = w.particles
+        big = self.kind == 'scream100'
+        rate = (70.0 + 50.0 * k) if big else 55.0
+        self.emit_acc += rate * dt
+        cols = ((Color(1, 1, 1, 1), Color(1, 0.95, 0.75, 1), Color(1, 0.82, 0.35, 1), Color(0.85, 0.9, 1, 1)) if big else
+                (Color(1, 0.9, 0.6, 1), Color(1, 0.75, 0.3, 1), Color(1, 1, 1, 1)))
+        while self.emit_acc >= 1.0:
+            self.emit_acc -= 1.0
+            if big:
+                up = random.uniform(13.0, 21.0) * (0.75 + 0.35 * k)
+                sp = random.uniform(-1.6, 1.6)
+                P.spark(top, (sp + random.uniform(-0.6, 0.6), up, random.uniform(-1.6, 1.6)),
+                        random.uniform(1.0, 1.7), random.uniform(0.12, 0.2), random.choice(cols), 9.0)
+            else:
+                P.spark(top, (random.uniform(-1.3, 1.3), random.uniform(6.0, 10.0), random.uniform(-1.3, 1.3)),
+                        random.uniform(0.6, 1.0), random.uniform(0.09, 0.14), random.choice(cols), 9.0)
+        if random.random() < (0.35 if big else 0.2):
+            P.smoke_puff(top, (random.uniform(-0.4, 0.4), 1.2, random.uniform(-0.4, 0.4)), 2.2, 0.3, 1.8, 0.8, 0.3)
+        flick = 0.75 + 0.25 * random.random()
+        if big:
+            w.lights.add((self.x, self.y + 2.5, self.z), (2.6 * flick, 2.4 * flick, 2.0 * flick), 16.0)
+            P.flash(top, 0.5 + 0.3 * random.random(), 0.06)
+        else:
+            w.lights.add((self.x, self.y + 1.2, self.z), (2.0 * flick, 1.5 * flick, 0.8 * flick), 9.0)
+        self.alarm_cd -= dt
+        if self.alarm_cd <= 0:
+            self.alarm_cd = 0.5
+            self.game.npcs.alarm(top, 30.0 if big else 20.0, 5.0)
+        if self.t >= dur and not self.remote:
+            self.explode()
+        elif self.remote and self.t >= dur + 1.0:
+            self.explode()                             # backup if the network 'explode' message never arrives
 
-    def explode(self):
+    def explode(self, pos=None):
         if self.dead:
             return
         self.dead = True
-        if self.fuse_snd is not None:
-            self.fuse_snd.stop()
+        for s in (self.fuse_snd, self.loop_snd):
+            if s is not None:
+                s.stop()
+        if pos is not None:
+            self.x, self.y, self.z = pos
         destroy(self.e)
-        self.sys.explode((self.x, self.y, self.z), self.kind, local=not getattr(self, 'remote', False))
+        if not self.remote and self.game.net is not None and self.fid is not None:
+            self.game.net.send_firework_explode(self.fid, (self.x, self.y, self.z))
+        self.sys.explode((self.x, self.y, self.z), self.kind, local=not self.remote)
 
 
 class ShockRing:
@@ -320,6 +437,8 @@ class FireworksSystem:
         self.effects = []
         self.wheel = WeaponWheel(self)
         self.throw_cd = 0.0
+        self.next_id = random.randint(1, 1 << 20)
+        self.remote_by_id = {}
 
     def equipped(self):
         return SLOTS[self.selected][0]
@@ -357,16 +476,37 @@ class FireworksSystem:
             pl.body.throw()
         self.inv[key] -= 1
         self.throw_cd = 0.45
-        self.active.append(Firework(self, key, origin, vel))
+        self.next_id += 1
+        self.active.append(Firework(self, key, origin, vel, fid=self.next_id))
         g.sound.play('whoosh', 0.6, 1.0)
         if g.net is not None:
-            g.net.send_firework(key, origin, vel)
+            g.net.send_firework(key, origin, vel, self.next_id)
 
-    def spawn_remote(self, kind, pos, vel):
+    def spawn_remote(self, kind, pos, vel, owner=None, fid=None):
         """A firework thrown by another player in multiplayer."""
+        if kind not in FIREWORK_INFO:
+            return
         f = Firework(self, kind, tuple(pos), tuple(vel))
         f.remote = True
         self.active.append(f)
+        if fid is not None:
+            self.remote_by_id[(owner, fid)] = f
+
+    def remote_land(self, owner, fid, pos, yaw):
+        f = self.remote_by_id.get((owner, fid))
+        if f is None or f.dead:
+            return
+        if f.phase == 'flying':
+            f.land(pos[0], pos[2], yaw)
+        else:                                   # already landed locally: move it to the thrower's exact spot
+            f.x, f.z, f.yaw = pos[0], pos[2], yaw
+            f.y = self.game.world.ground_height(f.x, f.z)
+            f.t = max(f.t, 0.0)
+
+    def remote_explode(self, owner, fid, pos):
+        f = self.remote_by_id.pop((owner, fid), None)
+        if f is not None and not f.dead:
+            f.explode(tuple(pos))
 
     def sky_burst(self, pos):
         """Decorative aerial firework (used on the main menu)."""
@@ -385,40 +525,48 @@ class FireworksSystem:
         g.sound.play('bang_cobra', 0.5, random.uniform(0.7, 0.9), pos, 70)
 
     def explode(self, pos, kind, local=True):
+        """Both fireworks end with the same massive, bass-heavy blast and a thick lingering smoke cloud."""
         g = self.game
         w = g.world
-        big = kind == 'scream100'
-        radius = 13.0 if big else 9.0
-        force = 24.0 if big else 16.0
+        big = True
+        radius = 14.0
+        force = 26.0
         x, y, z = pos
-        g.sound.play('bang_scream' if big else 'bang_cobra', 1.0, random.uniform(0.94, 1.06), pos, 55 if big else 42)
-        w.lights.flash((x, y + 1.5, z), (9.0, 7.0, 4.5) if big else (7.0, 5.0, 3.0), radius * 3.0, 0.5 if big else 0.35)
+        g.sound.play('bang_mega', 1.0, random.uniform(0.96, 1.04), pos, 60)
+        g.sound.play('bang_scream', 0.7, random.uniform(0.85, 0.95), pos, 45)     # layered for extra bass
+        w.lights.flash((x, y + 1.5, z), (11.0, 8.0, 5.0), radius * 3.2, 0.6)
         P = w.particles
-        P.flash((x, y + 0.8, z), 8.0 if big else 6.0, 0.16)
-        P.flash((x, y + 0.5, z), 4.0, 0.3)
-        for _ in range(16 if big else 11):
+        P.flash((x, y + 0.8, z), 10.0, 0.18)
+        P.flash((x, y + 0.6, z), 5.0, 0.35)
+        for _ in range(18):
             P.fire((x + random.uniform(-0.6, 0.6), y + random.uniform(0.2, 1.0), z + random.uniform(-0.6, 0.6)),
-                   (random.uniform(-5, 5), random.uniform(1, 6), random.uniform(-5, 5)), random.uniform(0.35, 0.7),
-                   1.0, random.uniform(3.0, 5.5) * (1.3 if big else 1.0))
-        for _ in range(90 if big else 60):
+                   (random.uniform(-6, 6), random.uniform(1, 7), random.uniform(-6, 6)), random.uniform(0.35, 0.75),
+                   1.2, random.uniform(4.0, 7.0))
+        for _ in range(110):
             a = random.uniform(0, 2 * math.pi)
-            s = random.uniform(6, 22)
-            P.spark((x, y + 0.3, z), (math.cos(a) * s, random.uniform(2, 14), math.sin(a) * s), random.uniform(0.4, 1.1), 0.12)
-        for _ in range(18 if big else 12):
-            P.smoke_puff((x + random.uniform(-1, 1), y + random.uniform(0.5, 2.0), z + random.uniform(-1, 1)),
-                         (random.uniform(-2, 2), random.uniform(0.8, 2.5), random.uniform(-2, 2)), random.uniform(3.0, 5.0),
-                         1.5, random.uniform(5.0, 8.0), 0.22, 0.6)
-        for k in range(24):
-            a = 2 * math.pi * k / 24
-            P.smoke_puff((x + math.cos(a), y + 0.3, z + math.sin(a)), (math.cos(a) * 9, 0.4, math.sin(a) * 9), 1.8, 0.8, 3.0, 0.6, 0.4)
-        w.decals.place(x, w.ground_height(x, z), z, 4.0 if big else 3.0)
+            sp = random.uniform(6, 24)
+            P.spark((x, y + 0.3, z), (math.cos(a) * sp, random.uniform(2, 15), math.sin(a) * sp), random.uniform(0.4, 1.2), 0.13)
+        # thick grey/white smoke that billows out and hangs in the air for several seconds
+        for _ in range(46):
+            a = random.uniform(0, 2 * math.pi)
+            d = random.uniform(0.0, 2.2)
+            sh = random.uniform(0.55, 0.9)
+            P.smoke_puff((x + math.cos(a) * d, y + random.uniform(0.4, 3.0), z + math.sin(a) * d),
+                         (math.cos(a) * random.uniform(1.0, 3.5), random.uniform(0.3, 1.4), math.sin(a) * random.uniform(1.0, 3.5)),
+                         random.uniform(7.0, 11.0), random.uniform(1.8, 3.0), random.uniform(6.5, 9.5), sh,
+                         random.uniform(0.55, 0.75), rise=-0.12, drag=0.9)
+        for k in range(28):
+            a = 2 * math.pi * k / 28
+            P.smoke_puff((x + math.cos(a), y + 0.3, z + math.sin(a)), (math.cos(a) * 10, 0.4, math.sin(a) * 10),
+                         random.uniform(3.5, 5.0), 1.0, 3.6, 0.7, 0.5, rise=-0.2, drag=1.3)
+        w.decals.place(x, w.ground_height(x, z), z, 4.5)
         if big:
             self.effects.append(ShockRing((x, w.ground_height(x, z), z), radius))
         self.effects.append(ShockRing((x, w.ground_height(x, z), z), radius * 0.6, 0.35))
         cam = camera.world_position
         dcam = math.sqrt((cam.x - x) ** 2 + (cam.y - y) ** 2 + (cam.z - z) ** 2)
-        g.camera_rig.shake(clampf((1.6 if big else 1.2) - dcam / 35.0, 0.0, 1.5))
-        g.hud.flash(clampf(1.0 - dcam / 70.0, 0.0, 0.85 if big else 0.6))
+        g.camera_rig.shake(clampf(1.9 - dcam / 32.0, 0.0, 1.8))
+        g.hud.flash(clampf(1.05 - dcam / 70.0, 0.0, 0.9))
         g.npcs.knockback(pos, radius, force)
         g.npcs.alarm(pos, 55.0, 9.0)
         g.traffic.alarm(pos, 45.0)
@@ -446,6 +594,8 @@ class FireworksSystem:
             f.update(dt)
             if f.dead:
                 self.active.remove(f)
+        if len(self.remote_by_id) > 40:
+            self.remote_by_id = {k: f for k, f in self.remote_by_id.items() if not f.dead}
         self.effects = [e for e in self.effects if e.update(dt)]
         self.wheel.update(dt)
 

@@ -374,7 +374,7 @@ class Host:
         self.remote[pid] = _time.time()
         if m.get('t') == 'leave':
             self._drop(pid)
-        elif m.get('t') in ('state', 'fw'):
+        elif m.get('t') in ('state', 'fw', 'fwl', 'fwx'):
             self.broadcast(m, exclude=pid)
             self.inbox.put(m)
 
@@ -445,7 +445,7 @@ class Host:
                 break
             for m in msgs:
                 m['id'] = pid
-                if m.get('t') in ('state', 'fw'):
+                if m.get('t') in ('state', 'fw', 'fwl', 'fwx'):
                     self.broadcast(m, exclude=pid)
                     self.inbox.put(m)
             if _time.time() - conn.last_rx > 12:
@@ -875,8 +875,17 @@ class NetSession:
             st['v'] = vs
         return st
 
-    def send_firework(self, kind, pos, vel):
-        self.link.send({'t': 'fw', 'kind': kind, 'pos': [round(c, 3) for c in pos], 'vel': [round(c, 3) for c in vel]})
+    def send_firework(self, kind, pos, vel, fid=None):
+        self.link.send({'t': 'fw', 'kind': kind, 'fid': fid,
+                        'pos': [round(c, 3) for c in pos], 'vel': [round(c, 3) for c in vel]})
+
+    def send_firework_land(self, fid, pos, yaw):
+        """Where my firework landed and stood up - everyone else snaps their copy to the same spot."""
+        self.link.send({'t': 'fwl', 'fid': fid, 'pos': [round(c, 3) for c in pos], 'yaw': round(yaw, 1)})
+
+    def send_firework_explode(self, fid, pos):
+        """The bang happens at the same moment and place for every player."""
+        self.link.send({'t': 'fwx', 'fid': fid, 'pos': [round(c, 3) for c in pos]})
 
     # ---- incoming
     def _add(self, pid, name):
@@ -909,7 +918,11 @@ class NetSession:
                 if pid in self.remotes:
                     self.remotes[pid].apply(m)
             elif t == 'fw':
-                g.fireworks.spawn_remote(m['kind'], m['pos'], m['vel'])
+                g.fireworks.spawn_remote(m.get('kind'), m['pos'], m['vel'], pid, m.get('fid'))
+            elif t == 'fwl':
+                g.fireworks.remote_land(pid, m.get('fid'), m.get('pos', (0, 0, 0)), float(m.get('yaw', 0.0)))
+            elif t == 'fwx':
+                g.fireworks.remote_explode(pid, m.get('fid'), m.get('pos', (0, 0, 0)))
             elif t == 'join':
                 self._add(pid, m.get('name', 'Player'))
                 g.hud.notify('%s joined the room' % m.get('name', 'Player'), rgb(120, 220, 255))

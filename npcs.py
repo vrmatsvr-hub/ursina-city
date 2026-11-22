@@ -85,16 +85,21 @@ class Humanoid:
         if pose != 'stand_ride':
             self.grips = None
 
-    def _legs(self, t0, s0, t1, s1, grounded=True):
+    def _legs(self, t0, s0, t1, s1, grounded=True, follow=1.0, dt=None):
         self.legs[0].rotation_x, self.shins[0].rotation_x = t0, s0
         self.legs[1].rotation_x, self.shins[1].rotation_x = t1, s1
         if grounded:
-            # keep the lowest foot on the floor: drop the pelvis by how much the legs fold
+            # keep the lowest foot on the floor: drop the pelvis by how much the legs fold.
+            # `follow` < 1 softens it (walking) so the head glides instead of bobbing.
             ext = max(0.44 * math.cos(math.radians(t0)) + 0.46 * math.cos(math.radians(t0 + s0)),
                       0.44 * math.cos(math.radians(t1)) + 0.46 * math.cos(math.radians(t1 + s1)))
-            self.pelvis.y = -(0.9 - ext)
+            target = -(0.9 - ext) * follow
         else:
-            self.pelvis.y = 0.0
+            target = 0.0
+        if dt is None:
+            self.pelvis.y = target
+        else:
+            self.pelvis.y += (target - self.pelvis.y) * min(1.0, dt * 8.0)
 
     def _arms(self, a0, a1, z0=0.0, z1=0.0):
         self.arms[0].rotation = (a0, 0, z0)
@@ -145,15 +150,18 @@ class Humanoid:
         if self.jump_mode is not None:
             self._animate_jump(dt)
         elif speed > 0.15:
-            stride = 1.2 + speed * 0.25
+            stride = 1.25 + speed * 0.22
             self.phase += dt * speed / stride * 2 * math.pi
-            amp = min(62.0, 18.0 + speed * 7.5)
+            amp = min(48.0, 16.0 + speed * 5.0)
             s = math.sin(self.phase) * amp
-            # knee bends while the leg is behind the body (heel lifts)
-            self._legs(s, max(0.0, s) * 1.1 + 4, -s, max(0.0, -s) * 1.1 + 4)
-            self._arms(-s * 0.8, s * 0.8)
-            self.upper.y = abs(math.cos(self.phase)) * 0.045 * min(1.0, speed / 2.0)
-            self.upper.rotation_x = min(12.0, speed * 1.6)
+            # knee bends while the leg is behind the body (heel lifts); the pelvis follows only
+            # a little and smoothly, so the head moves ~2-4 cm instead of bouncing
+            run = clampf((speed - 4.5) / 3.0, 0.0, 1.0)
+            self._legs(s, max(0.0, s) * 1.0 + 4, -s, max(0.0, -s) * 1.0 + 4,
+                       follow=0.18 + 0.17 * run, dt=dt)
+            self._arms(-s * 0.7, s * 0.7)
+            self.upper.y = (math.cos(self.phase * 2.0) * 0.5 + 0.5) * (0.012 + 0.018 * run)
+            self.upper.rotation_x += (min(10.0, speed * 1.2) - self.upper.rotation_x) * min(1.0, dt * 6)
         else:
             k = min(1.0, dt * 8)
             t0 = self.legs[0].rotation_x * (1 - k)

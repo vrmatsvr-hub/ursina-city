@@ -15,7 +15,7 @@ Contents
     tyre marks
   * city generation: asphalt roads with markings and zebra crossings,
     sidewalks with curbs, Dutch row houses, modern blocks, enterable
-    "Winkels", the E-tuning garage, business properties, a park with the
+    shops, the E-tuning garage, business properties, a park with the
     fireworks dealer, parking lots, streetlights, trees and a dike border
   * collision world (AABB spatial hash) + ground height + camera raycasts
   * the day/night cycle that drives every light in the scene
@@ -1315,17 +1315,17 @@ POLE = rgb(46, 50, 54)
 #               lot      type        name                    kind / price, income per minute
 LOT_SPECIAL = {
     (2, 2): ('park',),
-    (1, 2): ('shop', 'AVONDWINKEL', 'convenience'),
-    (3, 1): ('shop', 'ELEKTRONICA', 'electronics'),
-    (2, 0): ('shop', 'JUWELIER', 'jewelry'),
+    (1, 2): ('shop', 'CORNER SHOP', 'convenience'),
+    (3, 1): ('shop', 'ELECTRONICS', 'electronics'),
+    (2, 0): ('shop', 'JEWELRY STORE', 'jewelry'),
     (3, 3): ('garage',),
-    (1, 1): ('business', 'KAPSALON SNACKBAR', 2500, 150),
-    (1, 3): ('business', 'AUTOWASSTRAAT', 6000, 360),
-    (2, 4): ('business', 'COFFEESHOP DE TOEKAN', 12000, 700),
-    (0, 2): ('business', 'E-STEP VERHUUR', 4000, 240),
-    (4, 2): ('business', 'NACHTCLUB DE BASS', 20000, 1150),
-    (0, 1): ('shop', 'NACHTWINKEL', 'convenience'),
-    (4, 3): ('shop', 'TANKSTATION', 'gas'),
+    (1, 1): ('business', 'KEBAB & SNACK BAR', 2500, 150),
+    (1, 3): ('business', 'CAR WASH', 6000, 360),
+    (2, 4): ('business', 'TOUCAN COFFEE SHOP', 12000, 700),
+    (0, 2): ('business', 'E-SCOOTER RENTAL', 4000, 240),
+    (4, 2): ('business', 'NIGHTCLUB BASS', 20000, 1150),
+    (0, 1): ('shop', 'NIGHT SHOP', 'convenience'),
+    (4, 3): ('shop', 'GAS STATION', 'gas'),
     (4, 0): ('parking',),
     (0, 4): ('parking',),
 }
@@ -1828,9 +1828,9 @@ class World:
         for px in (-2.1, 2.1):
             self._fbox('misc', fr, (px, 1.75, -0.8), (0.08, 1.4, 0.08), POLE)
         self._fbox('neon', fr, (0, 2.6, -0.92), (4.0, 0.5, 0.04), rgb(255, 120, 20))
-        world_text('VUURWERK', fr.p(0, 2.6, -0.98), fr.a, 0.42, rgb(20, 10, 0))
+        world_text('FIREWORKS', fr.p(0, 2.6, -0.98), fr.a, 0.42, rgb(20, 10, 0))
         self._fbox('misc', fr, (0, 1.12, 0.1), (4.5, 0.04, 2.8), rgb(240, 240, 240))
-        self.dealer = dict(pos=fr.p(0, 0, -1.6), npc=fr.p(0, 0, 0.6), npc_yaw=fr.yaw_of(0, -1), name='Vuurwerk Dealer')
+        self.dealer = dict(pos=fr.p(0, 0, -1.6), npc=fr.p(0, 0, 0.6), npc_yaw=fr.yaw_of(0, -1), name='Fireworks Dealer')
         self.interior_lights.append((fr.p(0, 1.0, -0.3), (1.0, 0.55, 0.25), 7.0))
         self.pois.append((sx, sz, 'dealer'))
         self.player_spawn = (cx - 2.0, CURB_H, iz0 - 1.6)
@@ -1875,7 +1875,7 @@ class World:
         for k in range(4):
             self.prop_spots.append(('cone', cx - 4 + k * 2.6, (iz0 + iz1) / 2 + 3.2))
 
-    # ---- enterable shop (Winkel)
+    # ---- enterable shop
     def _shop(self, B, fr, name, kind):
         w, d, h, H = 18.0, 14.0, 5.2, 11.5
         t = 0.35
@@ -2017,7 +2017,7 @@ class World:
         self.collision.add(*self._garage_box(fr, w / 2 - 2.1, 1.0, w / 2 - 0.9, 5.2))
         self._fbox('neon', fr, (0, 5.9, -d / 2 - 0.14), (9.0, 1.2, 0.2), rgb(0, 190, 255))
         world_text('E-TUNING GARAGE', fr.p(0, 5.9, -d / 2 - 0.27), fr.a, 0.7, rgb(5, 20, 40))
-        world_text('MOTOR - ACCU - VERING - LAK', fr.p(0, 5.1, -d / 2 - 0.27), fr.a, 0.35, rgb(160, 230, 255))
+        world_text('MOTOR - BATTERY - SUSPENSION - PAINT', fr.p(0, 5.1, -d / 2 - 0.27), fr.a, 0.35, rgb(160, 230, 255))
         self.interior_lights.append((fr.p(0, h - 1.0, 0.5), (0.7, 0.95, 1.0), 13.0))
         zmin = fr.p(-3.0, 0, -4.0)
         zmax = fr.p(3.0, 0, 5.0)
@@ -2051,11 +2051,11 @@ class World:
                 c = fr.p(-5.4 + k * 3.6, h + 1.3 + row * 2.7, -d / 2)
                 self.B['glass' if random.random() < 0.5 else 'winlit'].face_quad(
                     c, (along[0], 0.0, along[1]), (0, 1, 0), (nrm2[0], 0.0, nrm2[1]), 1.3, 1.8, Color(1, 0.9, 0.74, 1))
-        # "TE KOOP" board on the sidewalk
+        # "FOR SALE" board on the sidewalk
         bp = (5.8, 0, -d / 2 - 2.3)
         self._fbox('misc', fr, (bp[0], 1.0, bp[2]), (0.1, 2.0, 0.1), POLE)
         self._fbox('misc', fr, (bp[0], 2.2, bp[2]), (1.9, 1.1, 0.08), rgb(245, 245, 240))
-        sale = world_text('TE KOOP', fr.p(bp[0], 2.35, bp[2] - 0.07), fr.a, 0.38, rgb(200, 20, 20))
+        sale = world_text('FOR SALE', fr.p(bp[0], 2.35, bp[2] - 0.07), fr.a, 0.38, rgb(200, 20, 20))
         price_txt = world_text('$%s' % format(price, ','), fr.p(bp[0], 1.95, bp[2] - 0.07), fr.a, 0.3, rgb(20, 20, 20))
         self.collision.add(*self._garage_box(fr, bp[0] - 0.1, bp[2] - 0.1, bp[0] + 0.1, bp[2] + 0.1))
         self.businesses.append(dict(name=name, price=price, income=income, pos=fr.p(2.0, 0, -d / 2 - 1.6),

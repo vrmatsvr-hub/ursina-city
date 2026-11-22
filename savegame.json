@@ -1,0 +1,11 @@
+{
+  "settings": {
+    "sens": 40,
+    "volume": 80,
+    "fov": 72,
+    "draw": 1,
+    "fullscreen": 0,
+    "name": "Player",
+    "last_ip": ""
+  }
+}

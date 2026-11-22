@@ -21,6 +21,7 @@ the main menu over a live, slowly flying view of the city.
 import sys
 import os
 import json
+import time as _time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 os.chdir(HERE)
@@ -94,15 +95,20 @@ def _quiet_window():
 
 class PauseMenu(Menu):
     def __init__(self, game):
-        super().__init__(game, 'PAUSED', 0.62, 0.56)
+        super().__init__(game, 'PAUSED', 0.62, 0.64)
 
     def build(self):
-        self.text('Ursina City v%s' % self.game.version, -0.28, 0.19, 1.0, rgb(200, 200, 200))
-        self.button('Resume', 0, 0.09, 0.4, 0.07, self.close, rgb(36, 140, 70))
-        self.button('Controls (F1)', 0, 0.0, 0.4, 0.07, self.help)
+        self.text('Ursina City v%s' % self.game.version, -0.28, 0.23, 1.0, rgb(200, 200, 200))
+        self.button('Resume', 0, 0.13, 0.4, 0.07, self.close, rgb(36, 140, 70))
+        self.button('Controls (F1)', 0, 0.04, 0.4, 0.07, self.help)
+        self.button('Main menu', 0, -0.05, 0.4, 0.07, self.main_menu)
         if self.game.net is not None:
-            self.button('Leave multiplayer', 0, -0.09, 0.4, 0.07, self.leave)
-        self.button('Quit game', 0, -0.18, 0.4, 0.07, application.quit, rgb(140, 40, 40))
+            self.button('Leave multiplayer', 0, -0.14, 0.4, 0.07, self.leave)
+        self.button('Quit game', 0, -0.23, 0.4, 0.07, application.quit, rgb(140, 40, 40))
+
+    def main_menu(self):
+        self.close()
+        self.game.return_to_main_menu()
 
     def help(self):
         self.close()
@@ -179,6 +185,22 @@ class Game(Entity):
         self.world.time_scale = 0.25
         self._show(MainMenu)
 
+    def return_to_main_menu(self):
+        """Esc -> Main menu: leave the session, park the player and show the start screen again."""
+        self.end_multiplayer()
+        pl = self.player
+        if pl.vehicle is not None:
+            pl.exit_vehicle()
+        self.wanted.clear()
+        self.wanted.level = 0
+        self.fireworks.wheel.hide()
+        if self.hud.help_panel is not None:
+            self.hud.toggle_help()
+        pl.respawn()
+        self.paused = False
+        self.vehicles.silence()
+        self.enter_main_menu()
+
     def back_to_main(self):
         self.write_settings_only()
         self._show(MainMenu)
@@ -216,25 +238,25 @@ class Game(Entity):
     def host_multiplayer(self, room_name, private, code, name):
         try:
             host = network.Host(room_name, private, code, name)
-        except OSError as ex:
+        except Exception as ex:
             if isinstance(self.screen, MultiplayerMenu):
                 self.screen.say('Could not start the server: %s' % ex)
             return
-        self.net = network.NetSession(self, 'host', host, room_name, code, private)
+        self.net = network.NetSession(self, 'host', host, room_name, host.code, private)
         self._start_play()
-        self.hud.notify('Room "%s" is %s%s' % (room_name, 'PRIVATE - code %s' % code if private else 'PUBLIC',
-                                               '  |  LAN IP %s' % network.local_ip()), rgb(120, 220, 255), 8)
+        self.hud.notify('Room "%s" is open - ROOM CODE: %s  (give this code to your friends)' % (room_name, host.code),
+                        rgb(120, 220, 255), 10)
 
-    def join_multiplayer(self, ip, code, name):
+    def join_multiplayer(self, code, name):
         try:
-            client = network.Client(ip, name, code)
+            client = network.Client(code, name)
         except Exception as ex:
             if isinstance(self.screen, MultiplayerMenu):
                 self.screen.say('Could not join: %s' % ex)
             return
         self.net = network.NetSession(self, 'client', client, client.room_name)
         self._start_play()
-        self.hud.notify('Joined "%s"' % client.room_name, rgb(120, 220, 255), 6)
+        self.hud.notify('Joined "%s" (%s)' % (client.room_name, client.via), rgb(120, 220, 255), 6)
 
     def end_multiplayer(self):
         if self.net is not None:
@@ -257,6 +279,36 @@ class Game(Entity):
         if isinstance(m, PauseMenu):
             self.paused = False
             mouse.locked = True
+
+    def take_screenshot(self):
+        """F12: saves a clean (HUD-free) PNG into the screenshots folder."""
+        folder = os.path.join(HERE, 'screenshots')
+        os.makedirs(folder, exist_ok=True)
+        name = os.path.join(folder, 'ursina_city_%s.png' % _time.strftime('%Y%m%d_%H%M%S'))
+        self.hud.set_visible(False)
+        try:
+            window.fps_counter.enabled = False
+        except Exception:
+            pass
+
+        def grab():
+            try:
+                from panda3d.core import Filename
+                base = getattr(application, 'base', None) or app
+                base.win.saveScreenshot(Filename.fromOsSpecific(name))
+                ok = True
+            except Exception as ex:
+                print('[screenshot] failed:', ex)
+                ok = False
+            self.hud.set_visible(self.mode == 'play')
+            try:
+                window.fps_counter.enabled = True
+            except Exception:
+                pass
+            if ok:
+                self.hud.notify('Screenshot saved: screenshots/%s' % os.path.basename(name), rgb(200, 220, 255))
+                self.sound.play('blip', 0.5, 1.4)
+        invoke(grab, delay=0.12)
 
     def claim_f9_bonus(self):
         """+5,000 coins, once per save (tracked in savegame.json)."""
@@ -313,6 +365,9 @@ class Game(Entity):
         if self.mode == 'menu':
             if self.screen is not None and self.screen.key(key):
                 return
+            if key == 'f12':
+                self.take_screenshot()
+                return
             if key == 'escape' and not isinstance(self.screen, MainMenu):
                 self.back_to_main()
             return
@@ -354,6 +409,8 @@ class Game(Entity):
                 pl.vehicle.reset_upright()
         elif key == 'f9':
             self.claim_f9_bonus()
+        elif key == 'f12':
+            self.take_screenshot()
         elif key in ('e', 'b', 'q'):
             for it in self.interactions:
                 if it['key'] == key and it['action'] is not None:

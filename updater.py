@@ -12,7 +12,7 @@ On startup the game (and START_GAME.bat) calls this module:
    writes the new version.json and relaunches the game.
 
 The remote version.json looks like:
-    {"version": "1.0.1", "files": ["main.py", "world.py", ...]}
+    {"version": "1.0.1", "files": ["main.py", "world.py", ...], "remove": ["old_file.py"]}
 
 Change GITHUB_REPO_URL (or put "repo_url" in your local version.json) to point
 at any public GitHub repository's raw files.
@@ -141,6 +141,17 @@ def apply(remote, timeout=15.0):
         with open(tmp, 'wb') as f:
             f.write(data)
         os.replace(tmp, path)
+    # files that a new version no longer needs (listed under "remove" in the remote version.json)
+    for name in remote.get('remove', []):
+        if name in PROTECTED or '..' in name or os.path.isabs(name) or not name.endswith(ALLOWED_EXT):
+            continue
+        path = os.path.join(HERE, name)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+                log('[updater] removed old file', name)
+            except OSError as ex:
+                log('[updater] could not remove', name, ex)
     info = local_info()
     info['version'] = remote['version']
     with open(VERSION_FILE, 'w') as f:

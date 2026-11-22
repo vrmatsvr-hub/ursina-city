@@ -656,15 +656,16 @@ class HUD:
             'WASD  move / drive          SHIFT  sprint / EV boost',
             'SPACE  jump / handbrake (drift!)   MOUSE  look',
             'E  enter / steal / carjack / exit / interact',
-            'B  buy a snack in a Winkel       H  horn     R  reset vehicle',
+            'B  buy a snack in a shop         H  horn     R  reset vehicle',
             'CTRL  wheelie on scooters / KuKirin / e-motorbike - no auto-balance, feather it!',
             'Q  re-open the tuning menu while parked on the E-Tuning pad',
             'V  first / third person          T  toggle day / night',
             'LEFT CLICK  throw firework       TAB (hold)  weapon wheel',
             '1 / 2 / 3 / scroll  select hands / Cobra 6 / Scream 100',
             'ESC  pause / close menu          F9  one-time +5,000 coin bonus',
+            'F12  screenshot (saved in the screenshots folder, without the HUD)',
             '',
-            'Minimap:  yellow = Winkels (rob them)   orange = Vuurwerk dealer',
+            'Minimap:  yellow = shops (rob them)   orange = fireworks dealer',
             '          cyan = E-Tuning garage        purple = businesses for sale',
             '          blue = time-trial start       green / yellow = courier pickup / drop-off',
             'Courier: grab the package at the green beacon, deliver it before the timer ends.',
@@ -754,7 +755,7 @@ class HUD:
                 self.speed_txt.text = st
             self.unit_txt.text = 'km/h' if not v.is_two_wheeler else 'km/h  %s' % v.display_name
             if v.is_ev:
-                et = '%dW   ACCU %d%%   ~%.1f km%s' % (v.watt, v.battery_pct(), v.range_km(), '   BOOST' if v.boost_active else '')
+                et = '%dW   BATTERY %d%%   ~%.1f km%s' % (v.watt, v.battery_pct(), v.range_km(), '   BOOST' if v.boost_active else '')
                 if self.ev_txt.text != et:
                     self.ev_txt.text = et
                 self.bat_bg.enabled = self.bat_bar.enabled = True

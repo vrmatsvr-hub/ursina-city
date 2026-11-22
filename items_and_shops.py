@@ -10,7 +10,7 @@ items_and_shops.py  -  fireworks, shops, robberies, businesses, tuning
              of bright sparks for 2 seconds, hops around, then a very loud
              bang with an expanding shockwave ring
 * Fireworks dealer stall (menu)
-* Store robberies in the Winkels - stay at the register while the clerk
+* Store robberies in the shops - stay at the register while the clerk
   empties it, shop alarm goes off, wanted stars + alert timer, cooldown
 * Ownable businesses: buy with stolen cash, passive income into a safe,
   collect + upgrade the income rate
@@ -337,7 +337,7 @@ class FireworksSystem:
         if key == 'hands' or self.throw_cd > 0:
             return
         if self.inv[key] <= 0:
-            g.hud.notify('No %s left - visit the Vuurwerk dealer in the park.' % FIREWORK_INFO[key]['name'], rgb(255, 160, 80))
+            g.hud.notify('No %s left - visit the fireworks dealer in the park.' % FIREWORK_INFO[key]['name'], rgb(255, 160, 80))
             g.sound.play('error', 0.5)
             return
         rig = g.camera_rig
@@ -453,7 +453,7 @@ class FireworksSystem:
 # =================================================================== dealer
 class DealerMenu(Menu):
     def __init__(self, game):
-        super().__init__(game, 'VUURWERK DEALER', 1.15, 0.62)
+        super().__init__(game, 'FIREWORKS DEALER', 1.15, 0.62)
 
     def build(self):
         g = self.game
@@ -526,7 +526,7 @@ class RobberySystem:
             return
         if pl.spend(15):
             pl.health = min(100.0, pl.health + 25)
-            self.game.hud.notify('Stroopwafel! +25 HP', rgb(120, 255, 140))
+            self.game.hud.notify('Tasty snack! +25 HP', rgb(120, 255, 140))
 
     def start(self, i):
         g = self.game
@@ -626,7 +626,7 @@ class BusinessMenu(Menu):
         if st['level'] < 5:
             cost = s.upgrade_cost(self.idx)
             nxt = int(b['income'] * (1 + 0.6 * st['level']))
-            self.button('UPGRADE to Lv %d  ($%s)\n-> $%d / min' % (st['level'] + 1, format(cost, ','), nxt), 0.2, -0.02, 0.36, 0.1,
+            self.button('UPGRADE to Lv %d  ($%s)\nearns $%d / min' % (st['level'] + 1, format(cost, ','), nxt), 0.2, -0.02, 0.36, 0.1,
                         self.upgrade, BTN_GOOD if g.player.cash >= cost else BTN_BAD)
         else:
             self.text('MAX LEVEL', 0.12, 0.0, 1.2, UI_ACCENT)
@@ -668,7 +668,7 @@ class BusinessSystem:
             return
         if self.game.player.spend(b['price']):
             st['owned'] = True
-            b['sale_text'].text = 'EIGENDOM'
+            b['sale_text'].text = 'OWNED'
             b['sale_text'].color = rgb(20, 150, 40)
             b['price_text'].text = 'Level 1'
             self.game.hud.notify('You now own %s!  +$%d / min' % (b['name'].title(), self.rate(i)), rgb(120, 255, 140))
@@ -750,9 +750,9 @@ class TuningMenu(Menu):
         self._row('MOTOR', 0.24, tier_items(v.motor_tiers(), v.motor_tier, getattr(v, 'motor_owned', v.motor_tier),
                                             lambda t: '%dW  (%d km/h)' % (t['watt'], v.tier_top_kmh(t)),
                                             self.set_motor))
-        self._row('ACCU', 0.12, tier_items(BATTERY_TIERS, v.battery_tier, getattr(v, 'battery_owned', v.battery_tier),
+        self._row('BATTERY', 0.12, tier_items(BATTERY_TIERS, v.battery_tier, getattr(v, 'battery_owned', v.battery_tier),
                                            lambda t: '%s  %dWh' % (t['name'], t['wh']), self.set_battery))
-        self._row('VERING', 0.0, self._susp_items(cash))
+        self._row('SUSPENSION', 0.0, self._susp_items(cash))
         self.text('FRAME / BODY COLOUR  ($%d)' % PAINT_PRICE, -0.74, -0.1, 1.0, UI_ACCENT)
         for i, (name, c) in enumerate(PAINT_COLORS):
             self.swatch(-0.36 + i * 0.075, -0.17, 0.06, c, lambda i=i: self.paint(i, None), i == v.primary)
@@ -761,8 +761,8 @@ class TuningMenu(Menu):
             self.swatch(-0.36 + i * 0.075, -0.3, 0.06, c, lambda i=i: self.paint(None, i), i == v.accent)
         self.text('Primary: %s   Accent: %s' % (PAINT_COLORS[v.primary][0], ACCENT_COLORS[v.accent][0]), 0.33, -0.16, 0.9,
                   rgb(200, 200, 200))
-        self.text('Higher wattage = more top speed + acceleration, but drains the accu faster.\n'
-                  'Bigger accu = more range and longer boost (hold SHIFT while riding).\n'
+        self.text('Higher wattage = more top speed + acceleration, but drains the battery faster.\n'
+                  'Bigger battery = more range and longer boost (hold SHIFT while riding).\n'
                   'Suspension changes ride height, stiffness and how well curbs / speed bumps are absorbed.',
                   -0.74, -0.35, 0.8, rgb(170, 170, 170))
 
@@ -800,7 +800,7 @@ class TuningMenu(Menu):
             v.battery_tier = i
             v.battery_owned = max(getattr(v, 'battery_owned', 0), i)
             v.recharge()
-            self.game.hud.notify('Accu: %s installed (charged)' % BATTERY_TIERS[i]['name'], rgb(120, 230, 255))
+            self.game.hud.notify('Battery: %s installed (charged)' % BATTERY_TIERS[i]['name'], rgb(120, 230, 255))
         self.rebuild()
 
     def set_susp(self, i, cost):
@@ -846,7 +846,7 @@ class TuningGarage:
         v.vx = v.vz = 0.0
         if v.battery_wh < v.capacity - 1:
             v.recharge()
-            self.game.hud.notify('Accu fully charged (free)', rgb(120, 230, 255))
+            self.game.hud.notify('Battery fully charged (free)', rgb(120, 230, 255))
         self.menu = TuningMenu(self.game, self, v)
 
     def interactions(self, player):
@@ -1023,9 +1023,9 @@ class CourierJobs:
 
 # race routes follow the road grid (consecutive nodes share a row or column)
 RACES = [
-    dict(name='Buitenring Sprint', prize=900,
+    dict(name='Outer Ring Sprint', prize=900,
          route=[(0, 0), (5, 0), (5, 5), (0, 5), (0, 0)]),
-    dict(name='Stadsrondje', prize=700,
+    dict(name='City Loop', prize=700,
          route=[(1, 1), (4, 1), (4, 4), (1, 4), (1, 2), (3, 2), (3, 3), (2, 3), (2, 1)]),
 ]
 
@@ -1131,7 +1131,7 @@ class TimeTrials:
                     cash += 250
                     g.hud.notify('NEW RECORD %.1fs on %s! (+$250)' % (a['t'], name), rgb(255, 220, 80))
                 pl.add_cash(cash, 'TIME TRIAL')
-                g.hud.notify('Finished %s in %.1fs  ->  $%d' % (name, a['t'], cash), rgb(120, 255, 140))
+                g.hud.notify('Finished %s in %.1fs  =  $%d' % (name, a['t'], cash), rgb(120, 255, 140))
                 self._stop(15.0)
                 return
             self._place_rings()

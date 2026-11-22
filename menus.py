@@ -8,9 +8,8 @@ menus.py  -  start screen, settings and the multiplayer room browser
   QUIT and the version number bottom-left
 * SettingsMenu: mouse sensitivity, master volume, field of view, draw distance,
   fullscreen (saved in savegame.json)
-* MultiplayerMenu: your name, LAN room list (name, players, lock icon for
-  PRIVATE rooms), direct join (host IP + room code) and Create Room
-  (room name, PUBLIC / PRIVATE toggle, custom or generated code)
+* MultiplayerMenu: your name, JOIN WITH A CODE, list of PUBLIC rooms (Wi-Fi +
+  online) and Create Room (room name, PUBLIC / PRIVATE toggle, room code)
 """
 from ursina import *
 import math
@@ -164,7 +163,7 @@ class MainMenu(Screen):
         gradient_panel(ui, -R - 0.01, -R + 1.05, 0.92, 0.0)
         Entity(parent=ui, model='quad', position=(-R + 0.06, 0.25), scale=(0.006, 0.16), color=ACCENT, z=-0.1)
         Text(text='URSINA CITY', parent=ui, position=(-R + 0.08, 0.33), origin=(-0.5, 0.5), scale=3.6, color=color.white, z=-0.1)
-        Text(text='crime  -  drifting  -  e-mobility  -  vuurwerk', parent=ui, position=(-R + 0.085, 0.215),
+        Text(text='crime  -  drifting  -  e-mobility  -  fireworks', parent=ui, position=(-R + 0.085, 0.215),
              origin=(-0.5, 0.5), scale=1.0, color=FONT_DIM, z=-0.1)
         items = (('SINGLEPLAYER', game.start_singleplayer), ('MULTIPLAYER', game.open_multiplayer),
                  ('SETTINGS', game.open_settings), ('QUIT', application.quit))
@@ -204,9 +203,9 @@ class SettingsMenu(Screen):
         for i, (label, val, key, step, lo, hi) in enumerate(rows):
             y = 0.2 - i * 0.08
             Text(text=label, parent=ui, position=(-R + 0.08, y), origin=(-0.5, 0), scale=1.15, z=-0.1)
-            menu_button(ui, '<', -R + 0.55, y, 0.05, 0.05, lambda k=key, s=-step, a=lo, b=hi: self.change(k, s, a, b))
+            menu_button(ui, '-', -R + 0.55, y, 0.05, 0.05, lambda k=key, s=-step, a=lo, b=hi: self.change(k, s, a, b))
             Text(text=val, parent=ui, position=(-R + 0.665, y), origin=(0, 0), scale=1.15, color=ACCENT, z=-0.1)
-            menu_button(ui, '>', -R + 0.78, y, 0.05, 0.05, lambda k=key, s=step, a=lo, b=hi: self.change(k, s, a, b))
+            menu_button(ui, '+', -R + 0.78, y, 0.05, 0.05, lambda k=key, s=step, a=lo, b=hi: self.change(k, s, a, b))
         menu_button(ui, 'BACK', -R + 0.29, -0.28, 0.42, 0.065, self.game.back_to_main)
 
     def change(self, key, step, lo, hi):
@@ -219,15 +218,16 @@ class SettingsMenu(Screen):
 
 class MultiplayerMenu(Screen):
     ALNUM = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -_')
-    IPCH = set('0123456789.abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+    CODECH = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')
 
     def __init__(self, game):
         super().__init__(game)
-        self.browser = network.LanBrowser()
+        self.browser = network.RoomBrowser()
         self.private = False
         self.room_ents = []
         self.room_cache = None
         self.refresh_t = 0.0
+        self.busy = False
         R = window.aspect_ratio / 2
         self.R = R
         ui = self.root
@@ -235,48 +235,44 @@ class MultiplayerMenu(Screen):
         Text(text='MULTIPLAYER', parent=ui, position=(-R + 0.08, 0.44), origin=(-0.5, 0.5), scale=2.6, z=-0.1)
         Text(text='Your name', parent=ui, position=(-R + 0.08, 0.31), origin=(-0.5, 0), scale=1.0, color=FONT_DIM, z=-0.1)
         self.name = TextField(ui, -R + 0.42, 0.31, 0.3, game.settings.get('name', 'Player'), 16, self.ALNUM)
-        # ---- join column
+        # ---- join column: just a code
         x0 = -R + 0.08
-        Text(text='JOIN A ROOM  (LAN)', parent=ui, position=(x0, 0.23), origin=(-0.5, 0), scale=1.25, color=ACCENT, z=-0.1)
-        self.rooms_hint = Text(text='Searching for rooms on your network ...', parent=ui, position=(x0, 0.18),
-                               origin=(-0.5, 0), scale=0.9, color=FONT_DIM, z=-0.1)
-        Text(text='DIRECT JOIN', parent=ui, position=(x0, -0.2), origin=(-0.5, 0), scale=1.15, color=ACCENT, z=-0.1)
-        Text(text='Host IP', parent=ui, position=(x0, -0.26), origin=(-0.5, 0), scale=0.95, color=FONT_DIM, z=-0.1)
-        self.ip = TextField(ui, x0 + 0.33, -0.26, 0.3, game.settings.get('last_ip', ''), 40, self.IPCH, '192.168.1.20')
-        Text(text='Room code', parent=ui, position=(x0, -0.32), origin=(-0.5, 0), scale=0.95, color=FONT_DIM, z=-0.1)
-        self.join_code = TextField(ui, x0 + 0.33, -0.32, 0.3, '', 6, self.ALNUM, 'only for PRIVATE')
-        menu_button(ui, 'JOIN', x0 + 0.62, -0.29, 0.14, 0.11, self.direct_join, rgb(36, 120, 70, 230))
+        Text(text='JOIN WITH A CODE', parent=ui, position=(x0, 0.22), origin=(-0.5, 0), scale=1.25, color=ACCENT, z=-0.1)
+        self.join_code = TextField(ui, x0 + 0.17, 0.155, 0.34, '', 6, self.CODECH, 'e.g. K7MQ2')
+        menu_button(ui, 'JOIN', x0 + 0.45, 0.155, 0.16, 0.055, self.join_typed, rgb(36, 120, 70, 230))
+        Text(text='PUBLIC ROOMS', parent=ui, position=(x0, 0.08), origin=(-0.5, 0), scale=1.1, color=ACCENT, z=-0.1)
+        self.rooms_hint = Text(text='Looking for rooms ...', parent=ui, position=(x0, 0.04), origin=(-0.5, 0),
+                               scale=0.9, color=FONT_DIM, z=-0.1)
         # ---- create column
         cx = 0.12
-        Text(text='CREATE ROOM', parent=ui, position=(cx, 0.23), origin=(-0.5, 0), scale=1.25, color=ACCENT, z=-0.1)
-        Text(text='Room name', parent=ui, position=(cx, 0.16), origin=(-0.5, 0), scale=0.95, color=FONT_DIM, z=-0.1)
-        self.room_name = TextField(ui, cx + 0.42, 0.16, 0.36, '%s\'s city' % self.name.value, 24, self.ALNUM)
+        Text(text='CREATE ROOM', parent=ui, position=(cx, 0.22), origin=(-0.5, 0), scale=1.25, color=ACCENT, z=-0.1)
+        Text(text='Room name', parent=ui, position=(cx, 0.155), origin=(-0.5, 0), scale=0.95, color=FONT_DIM, z=-0.1)
+        self.room_name = TextField(ui, cx + 0.42, 0.155, 0.36, "%s's city" % self.name.value, 24, self.ALNUM)
         self.pub_btn = menu_button(ui, 'PUBLIC', cx + 0.12, 0.07, 0.22, 0.055, lambda: self.set_private(False))
         self.priv_btn = menu_button(ui, 'PRIVATE', cx + 0.36, 0.07, 0.22, 0.055, lambda: self.set_private(True))
-        self.code_lbl = Text(text='Room code', parent=ui, position=(cx, -0.01), origin=(-0.5, 0), scale=0.95, color=FONT_DIM, z=-0.1)
-        self.code = TextField(ui, cx + 0.33, -0.01, 0.2, network.make_code(), 6, self.ALNUM)
-        self.gen_btn = menu_button(ui, 'GENERATE', cx + 0.53, -0.01, 0.16, 0.05, self.generate)
-        menu_button(ui, 'CREATE & HOST', cx + 0.24, -0.1, 0.48, 0.07, self.create, rgb(36, 120, 70, 230))
-        Text(text='Friends on the same Wi-Fi see the room automatically. Over the internet they need your\n'
-                  'public IP (UPnP is tried automatically, otherwise forward TCP port 47500 in your router).\n'
-                  'Allow Python through the Windows Firewall when asked.',
-             parent=ui, position=(cx, -0.17), origin=(-0.5, 0.5), scale=0.78, color=FONT_DIM, z=-0.1)
+        self.mode_hint = Text(text='', parent=ui, position=(cx, 0.02), origin=(-0.5, 0), scale=0.85, color=FONT_DIM, z=-0.1)
+        Text(text='Room code', parent=ui, position=(cx, -0.04), origin=(-0.5, 0), scale=0.95, color=FONT_DIM, z=-0.1)
+        self.code = TextField(ui, cx + 0.33, -0.04, 0.2, network.make_code(), 6, self.CODECH)
+        menu_button(ui, 'NEW CODE', cx + 0.53, -0.04, 0.16, 0.05, self.generate)
+        menu_button(ui, 'CREATE & HOST', cx + 0.24, -0.13, 0.48, 0.07, self.create, rgb(36, 120, 70, 230))
+        Text(text='Friends only need the room code - on the same Wi-Fi or anywhere on the internet.\n'
+                  'Allow Python through the Windows Firewall if Windows asks.',
+             parent=ui, position=(cx, -0.2), origin=(-0.5, 0.5), scale=0.78, color=FONT_DIM, z=-0.1)
         self.status = Text(text='', parent=ui, position=(-R + 0.08, -0.42), origin=(-0.5, 0), scale=1.05,
                            color=rgb(255, 200, 120), z=-0.1)
         menu_button(ui, 'BACK', R - 0.17, -0.44, 0.22, 0.06, self.back)
-        self.fields = [self.name, self.ip, self.join_code, self.room_name, self.code]
+        self.fields = [self.name, self.join_code, self.room_name, self.code]
         self.set_private(False)
 
     def set_private(self, on):
         self.private = on
         self.pub_btn.color = rgb(255, 140, 30, 235) if not on else rgb(20, 24, 32, 200)
         self.priv_btn.color = rgb(255, 140, 30, 235) if on else rgb(20, 24, 32, 200)
-        self.code.set_enabled(on)
-        self.gen_btn.enabled = on
-        self.code_lbl.enabled = on
+        self.mode_hint.text = ('Hidden - only people you give the code to can join.' if on else
+                               'Listed in PUBLIC ROOMS - anyone can click to join.')
 
     def generate(self):
-        self.code.value = network.make_code(random.choice((4, 5, 6)))
+        self.code.value = network.make_code(5)
         self.code.refresh()
 
     def _player_name(self):
@@ -286,58 +282,57 @@ class MultiplayerMenu(Screen):
 
     def say(self, msg):
         self.status.text = msg
+        self.busy = False
 
     def create(self):
-        code = self.code.value.strip().upper()
-        if self.private and len(code) < 4:
-            self.say('A private room needs a code of 4-6 characters (or press GENERATE).')
+        if self.busy:
             return
-        name = self.room_name.value.strip() or 'Ursina City'
-        self.say('Starting server ...')
-        invoke(self.game.host_multiplayer, name, self.private, code, self._player_name(), delay=0.05)
-
-    def join(self, ip, code):
-        self.game.settings['last_ip'] = ip
-        self.say('Connecting to %s ...' % ip)
-        invoke(self.game.join_multiplayer, ip, code, self._player_name(), delay=0.05)
-
-    def direct_join(self):
-        ip = self.ip.value.strip()
-        if not ip:
-            self.say('Type the host IP address first.')
+        code = network.clean_code(self.code.value)
+        if len(code) < 4:
+            self.status.text = 'Room codes need 4-6 letters/numbers (press NEW CODE).'
             return
-        self.join(ip, self.join_code.value.strip().upper())
+        self.busy = True
+        self.status.text = 'Starting the room ...'
+        invoke(self.game.host_multiplayer, self.room_name.value.strip() or 'Ursina City', self.private, code,
+               self._player_name(), delay=0.05)
 
-    def pick_room(self, room):
-        if room.get('private'):
-            self.ip.value = room['ip']
-            self.ip.refresh()
-            self.join_code.focus()
-            self.say('"%s" is PRIVATE - type the room code and press JOIN.' % room['name'])
-        else:
-            self.join(room['ip'], '')
+    def join(self, code):
+        if self.busy:
+            return
+        code = network.clean_code(code)
+        if len(code) < 4:
+            self.status.text = 'Type the 4-6 character room code you got from your friend.'
+            return
+        self.busy = True
+        self.status.text = 'Looking for room %s ...' % code
+        invoke(self.game.join_multiplayer, code, self._player_name(), delay=0.05)
+
+    def join_typed(self):
+        self.join(self.join_code.value)
 
     def _draw_rooms(self, rooms):
         for e in self.room_ents:
             destroy(e)
         self.room_ents = []
         x0 = -self.R + 0.08
-        self.rooms_hint.text = ('%d room(s) found - click to join' % len(rooms)) if rooms else \
-            'No rooms found on your network yet (searching ...)'
+        if rooms:
+            self.rooms_hint.text = 'Click a room to join'
+        elif self.browser.relay_ok is False:
+            self.rooms_hint.text = 'No public rooms on your Wi-Fi (internet room list unreachable)'
+        else:
+            self.rooms_hint.text = 'No public rooms right now - create one, or join with a code'
         for i, r in enumerate(rooms[:6]):
-            y = 0.12 - i * 0.055
-            label = '%s' % r.get('name', '?')
-            b = menu_button(self.root, '', x0 + 0.32, y, 0.64, 0.048, lambda r=r: self.pick_room(r), rgb(26, 30, 40, 230),
-                            rgb(60, 70, 90, 240))
+            y = -0.01 - i * 0.055
+            b = menu_button(self.root, '', x0 + 0.32, y, 0.64, 0.048, lambda r=r: self.join(r.get('code', '')),
+                            rgb(26, 30, 40, 230), rgb(60, 70, 90, 240))
             self.room_ents.append(b)
-            self.room_ents.append(Text(text=label, parent=self.root, position=(x0 + 0.03, y), origin=(-0.5, 0), scale=1.0, z=-0.2))
+            self.room_ents.append(Text(text=network.safe_text(r.get('name', '?'), 24), parent=self.root, position=(x0 + 0.03, y),
+                                       origin=(-0.5, 0), scale=1.0, z=-0.2))
             self.room_ents.append(Text(text='%d/%d' % (r.get('players', 1), r.get('max', 8)), parent=self.root,
-                                       position=(x0 + 0.5, y), origin=(0, 0), scale=1.0, color=FONT_DIM, z=-0.2))
-            if r.get('private'):
-                self.room_ents += lock_icon(self.root, x0 + 0.6, y - 0.004, 1.4)
-            else:
-                self.room_ents.append(Text(text='OPEN', parent=self.root, position=(x0 + 0.6, y), origin=(0, 0), scale=0.8,
-                                           color=rgb(120, 230, 140), z=-0.2))
+                                       position=(x0 + 0.46, y), origin=(0, 0), scale=1.0, color=FONT_DIM, z=-0.2))
+            self.room_ents.append(Text(text='WI-FI' if r.get('where') == 'LAN' else 'ONLINE', parent=self.root,
+                                       position=(x0 + 0.57, y), origin=(0, 0), scale=0.75,
+                                       color=rgb(120, 230, 140) if r.get('where') == 'LAN' else rgb(120, 200, 255), z=-0.2))
 
     def tick(self, dt):
         super().tick(dt)
@@ -345,7 +340,7 @@ class MultiplayerMenu(Screen):
         if self.refresh_t <= 0:
             self.refresh_t = 1.0
             rooms = self.browser.list()
-            sig = [(r['ip'], r.get('port'), r.get('players'), r.get('name')) for r in rooms]
+            sig = [(r.get('code'), r.get('players'), r.get('name'), r.get('where')) for r in rooms] + [self.browser.relay_ok]
             if sig != self.room_cache:
                 self.room_cache = sig
                 self._draw_rooms(rooms)

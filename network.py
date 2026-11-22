@@ -1,47 +1,61 @@
 """
-network.py  -  LAN / direct-IP multiplayer for Ursina City
-============================================================
+network.py  -  code-only multiplayer for Ursina City
+======================================================
 
-Pure Python `socket` + `threading`, no extra libraries.
+Players only ever type a ROOM CODE - no IP addresses, no port forwarding.
 
-* The HOST runs a TCP server (port 47500). Every client sends its own state
-  (character, vehicle, fireworks it throws) ~15x per second; the host relays
-  everything to everybody. Sockets are read on background threads and all
-  messages are handed to the game thread through a queue (Ursina is not
-  thread-safe).
-* LAN discovery: clients broadcast a UDP packet on port 47501, hosts answer with
-  their room name, player count and whether the room is PRIVATE.
-* PRIVATE rooms require the room code; PUBLIC rooms are open to everyone.
-* Optional UPnP: the host asks the router to forward port 47500 so friends on
-  the internet can join with the host's public IP + room code.
+* Same Wi-Fi / LAN: the host answers UDP discovery pings (port 47501) and the
+  game connects straight to it over TCP (port 47500) - fastest.
+* Over the internet: host and players meet on a free public MQTT relay server
+  (broker.hivemq.com, with fallbacks). All game messages for room ABC12 travel
+  on the topics  ursinacity/v1/ABC12/... , so the code is the address.
+* PUBLIC rooms are announced in the room list (LAN + internet); PRIVATE rooms
+  are never listed - you can only join them if someone gives you the code.
 
-What is synced: player characters (walk / run / jump / ride poses), the cars,
-E-scooters, E-motorbikes and KuKirin G2s they drive, and every Cobra 6 /
-Scream 100 they throw (each client simulates the firework, so explosions knock
-everyone around). Traffic, pedestrians and police stay local to each player.
+Everything is pure Python `socket` + `threading`. Sockets are read on background
+threads; all messages reach the game thread through a queue.
+
+Synced: player characters (walk / run / jump / ride poses), the cars, scooters,
+e-motorbikes and KuKirin G2s they drive (incl. wheelies) and every Cobra 6 /
+Scream 100 they throw. Traffic, pedestrians and police stay local.
 """
+import hashlib
 import json
 import math
 import queue
 import random
 import socket
-import string
+import struct
 import threading
 import time as _time
-import urllib.request
-import re
 
 PORT = 47500
 DISCOVERY_PORT = 47501
-PROTOCOL = 1
-MAGIC = b'URSINA_CITY_DISCOVER_V1'
+PROTOCOL = 2
+MAGIC = b'URSINA_CITY_DISCOVER_V2'
 SEND_RATE = 15.0
 MAX_PLAYERS = 8
+TOPIC_ROOT = 'ursinacity/v1'
+BROKERS = [('broker.hivemq.com', 1883), ('broker.emqx.io', 1883), ('test.mosquitto.org', 1883)]
+CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
 
 # ------------------------------------------------------------------ helpers
 def make_code(n=5):
-    return ''.join(random.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(n))
+    return ''.join(random.choice(CODE_CHARS) for _ in range(n))
+
+
+def clean_code(code):
+    return ''.join(ch for ch in str(code).upper() if ch.isalnum())[:8]
+
+
+def safe_text(s, n=24):
+    """Ursina treats < and > as formatting tags - strip them from anything another player typed."""
+    return ''.join(ch for ch in str(s) if ch not in '<>\n\r')[:n]
+
+
+def code_hash(code):
+    return hashlib.sha1(('ursinacity:' + clean_code(code)).encode()).hexdigest()[:12]
 
 
 def local_ip():
@@ -106,84 +120,265 @@ class _Conn:
             pass
 
 
-# ------------------------------------------------------------------ UPnP (best effort)
-def upnp_forward(port, desc='Ursina City'):
-    """Asks the router (UPnP IGD) to forward TCP `port` to this PC. Returns the public IP or None."""
-    try:
-        ssdp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-        ssdp.settimeout(2.0)
-        req = ('M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: "ssdp:discover"\r\nMX: 2\r\n'
-               'ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\r\n')
-        ssdp.sendto(req.encode(), ('239.255.255.250', 1900))
-        data, _ = ssdp.recvfrom(4096)
-        ssdp.close()
-        loc = re.search(r'(?i)location:\s*(\S+)', data.decode(errors='ignore')).group(1)
-        xml = urllib.request.urlopen(loc, timeout=3).read().decode(errors='ignore')
-        svc = None
-        for st in ('WANIPConnection:1', 'WANIPConnection:2', 'WANPPPConnection:1'):
-            m = re.search(r'<serviceType>urn:schemas-upnp-org:service:%s</serviceType>.*?<controlURL>(.*?)</controlURL>' % st,
-                          xml, re.S)
-            if m:
-                svc = (st, m.group(1))
-                break
-        if svc is None:
-            return None
-        base = re.match(r'(https?://[^/]+)', loc).group(1)
-        url = svc[1] if svc[1].startswith('http') else base + svc[1]
-        stype = 'urn:schemas-upnp-org:service:' + svc[0]
+# ------------------------------------------------------------------ tiny MQTT 3.1.1 client (QoS 0)
+def _mqtt_str(s):
+    b = s.encode('utf-8')
+    return struct.pack('!H', len(b)) + b
 
-        def soap(action, args):
-            body = ''.join('<%s>%s</%s>' % (k, v, k) for k, v in args)
-            env = ('<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" '
-                   's:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:%s xmlns:u="%s">%s</u:%s>'
-                   '</s:Body></s:Envelope>') % (action, stype, body, action)
-            r = urllib.request.Request(url, env.encode(), {'Content-Type': 'text/xml; charset="utf-8"',
-                                                           'SOAPAction': '"%s#%s"' % (stype, action)})
-            return urllib.request.urlopen(r, timeout=3).read().decode(errors='ignore')
-        soap('AddPortMapping', [('NewRemoteHost', ''), ('NewExternalPort', port), ('NewProtocol', 'TCP'),
-                                ('NewInternalPort', port), ('NewInternalClient', local_ip()), ('NewEnabled', 1),
-                                ('NewPortMappingDescription', desc), ('NewLeaseDuration', 0)])
-        res = soap('GetExternalIPAddress', [])
-        m = re.search(r'<NewExternalIPAddress>(.*?)</NewExternalIPAddress>', res)
-        return m.group(1) if m else 'unknown'
+
+def _mqtt_len(n):
+    out = b''
+    while True:
+        d = n % 128
+        n //= 128
+        out += bytes([d | (0x80 if n > 0 else 0)])
+        if n == 0:
+            return out
+
+
+class MqttLink:
+    """Just enough MQTT to use a public broker as a relay: connect, subscribe, publish, last will."""
+
+    def __init__(self, on_message, will_topic=None, will_payload=b'', will_retain=False, brokers=None, timeout=5.0):
+        self.on_message = on_message
+        self.lock = threading.Lock()
+        self.alive = False
+        self.broker = None
+        self.pid = 1
+        err = None
+        for host, port in (brokers or BROKERS):
+            try:
+                self._connect(host, port, will_topic, will_payload, will_retain, timeout)
+                self.broker = host
+                break
+            except Exception as ex:
+                err = ex
+        if self.broker is None:
+            raise ConnectionError('no relay server reachable (%s)' % err)
+        threading.Thread(target=self._loop, daemon=True).start()
+        threading.Thread(target=self._pinger, daemon=True).start()
+
+    def _connect(self, host, port, will_topic, will_payload, will_retain, timeout):
+        sock = socket.create_connection((host, port), timeout=timeout)
+        cid = 'uc-' + ''.join(random.choice('abcdefghijklmnopqrstuvwxyz0123456789') for _ in range(12))
+        flags = 0x02
+        payload = _mqtt_str(cid)
+        if will_topic:
+            flags |= 0x04 | (0x20 if will_retain else 0)
+            payload += _mqtt_str(will_topic) + struct.pack('!H', len(will_payload)) + will_payload
+        var = _mqtt_str('MQTT') + bytes([4, flags]) + struct.pack('!H', 30)
+        body = var + payload
+        sock.sendall(bytes([0x10]) + _mqtt_len(len(body)) + body)
+        hdr = self._recv_exact(sock, 4)
+        if hdr[0] != 0x20 or hdr[3] != 0:
+            sock.close()
+            raise ConnectionError('broker refused the connection')
+        sock.settimeout(None)
+        self.sock = sock
+        self.alive = True
+
+    @staticmethod
+    def _recv_exact(sock, n):
+        data = b''
+        while len(data) < n:
+            chunk = sock.recv(n - len(data))
+            if not chunk:
+                raise ConnectionError('connection closed')
+            data += chunk
+        return data
+
+    def _send(self, data):
+        if not self.alive:
+            return
+        try:
+            with self.lock:
+                self.sock.sendall(data)
+        except OSError:
+            self.alive = False
+
+    def subscribe(self, topic):
+        self.pid = self.pid % 65000 + 1
+        body = struct.pack('!H', self.pid) + _mqtt_str(topic) + b'\x00'
+        self._send(bytes([0x82]) + _mqtt_len(len(body)) + body)
+
+    def publish(self, topic, payload, retain=False):
+        if isinstance(payload, (dict, list)):
+            payload = json.dumps(payload, separators=(',', ':'))
+        if isinstance(payload, str):
+            payload = payload.encode()
+        body = _mqtt_str(topic) + payload
+        self._send(bytes([0x30 | (1 if retain else 0)]) + _mqtt_len(len(body)) + body)
+
+    def _pinger(self):
+        while self.alive:
+            _time.sleep(15)
+            self._send(b'\xc0\x00')
+
+    def _loop(self):
+        s = self.sock
+        try:
+            while self.alive:
+                h = self._recv_exact(s, 1)[0]
+                mult, length = 1, 0
+                while True:
+                    d = self._recv_exact(s, 1)[0]
+                    length += (d & 127) * mult
+                    mult *= 128
+                    if not d & 128:
+                        break
+                body = self._recv_exact(s, length) if length else b''
+                if h >> 4 == 3:                                   # PUBLISH
+                    tl = struct.unpack('!H', body[:2])[0]
+                    topic = body[2:2 + tl].decode('utf-8', 'ignore')
+                    off = 2 + tl + (2 if (h >> 1) & 3 else 0)
+                    try:
+                        self.on_message(topic, body[off:])
+                    except Exception as ex:
+                        print('[net] message error:', ex)
+        except Exception:
+            pass
+        self.alive = False
+        try:
+            self.on_message(None, None)                           # tell the owner we lost the relay
+        except Exception:
+            pass
+
+    def close(self):
+        if self.alive:
+            self._send(b'\xe0\x00')                               # DISCONNECT (will is not sent)
+        self.alive = False
+        try:
+            self.sock.close()
+        except Exception:
+            pass
+
+
+def _decode(payload):
+    try:
+        return json.loads(payload)
     except Exception:
         return None
 
 
 # ------------------------------------------------------------------ host
 class Host:
+    """Runs the room: LAN TCP server + internet relay bridge. Every player's messages go through here."""
+
     def __init__(self, room_name, private, code, host_name, port=PORT):
-        self.room_name = room_name or 'Ursina City Room'
+        self.room_name = safe_text(room_name or 'Ursina City', 24) or 'Ursina City'
         self.private = bool(private)
-        self.code = (code or '').strip().upper()
+        self.code = clean_code(code) or make_code()
+        self.hash = code_hash(self.code)
         self.port = port
         self.inbox = queue.Queue()
-        self.clients = {}           # id -> _Conn
+        self.lock = threading.Lock()
+        self.tcp = {}              # id -> _Conn (LAN players)
+        self.remote = {}           # id -> last seen time (internet players)
+        self.tokens = {}           # relay token -> id
         self.names = {0: host_name}
         self.next_id = 1
         self.running = True
-        self.public_ip = None
-        self.upnp_status = 'UPnP: trying ...'
-        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server.bind(('', port))
-        self.server.listen(8)
-        self.server.settimeout(0.5)
-        threading.Thread(target=self._accept_loop, daemon=True).start()
-        threading.Thread(target=self._discovery_loop, daemon=True).start()
-        threading.Thread(target=self._upnp, daemon=True).start()
+        self.lan_ok = False
+        self.relay = None
+        self.relay_status = 'Internet relay: connecting ...'
+        self.base = '%s/%s/' % (TOPIC_ROOT, self.code)
+        try:
+            self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.server.bind(('', port))
+            self.server.listen(8)
+            self.server.settimeout(0.5)
+            self.lan_ok = True
+            threading.Thread(target=self._accept_loop, daemon=True).start()
+            threading.Thread(target=self._discovery_loop, daemon=True).start()
+        except OSError as ex:
+            print('[net] LAN server unavailable:', ex)
+        threading.Thread(target=self._start_relay, daemon=True).start()
 
+    # ---- bookkeeping
     def player_count(self):
-        return 1 + len(self.clients)
+        return 1 + len(self.tcp) + len(self.remote)
 
-    def _upnp(self):
-        ip = upnp_forward(self.port)
-        if ip:
-            self.public_ip = ip
-            self.upnp_status = 'UPnP OK - internet IP %s' % ip
-        else:
-            self.upnp_status = 'UPnP unavailable (LAN / port-forward 47500)'
+    def _room_info(self):
+        return dict(name=self.room_name, players=self.player_count(), max=MAX_PLAYERS, private=self.private,
+                    hash=self.hash, code=None if self.private else self.code, proto=PROTOCOL, port=self.port)
 
+    def _new_player(self, name):
+        with self.lock:
+            pid = self.next_id
+            self.next_id += 1
+            self.names[pid] = (safe_text(name, 16) or 'Player')
+        return pid
+
+    def _check_hello(self, m):
+        if m.get('proto') != PROTOCOL:
+            return 'Different game version - update the game'
+        if self.player_count() >= MAX_PLAYERS:
+            return 'Room is full'
+        return None
+
+    # ---- internet relay
+    def _start_relay(self):
+        try:
+            will = '%s/rooms/%s' % (TOPIC_ROOT, self.code) if not self.private else None
+            self.relay = MqttLink(self._on_relay, will_topic=will, will_payload=b'', will_retain=True)
+            self.relay.subscribe(self.base + 'c2h')
+            self.relay_status = 'Internet: ON (relay %s)' % self.relay.broker
+            threading.Thread(target=self._announce_loop, daemon=True).start()
+        except Exception as ex:
+            self.relay = None
+            self.relay_status = 'Internet relay unreachable - LAN only'
+            print('[net]', ex)
+
+    def _announce_loop(self):
+        while self.running and self.relay is not None and self.relay.alive:
+            if not self.private:
+                self.relay.publish('%s/rooms/%s' % (TOPIC_ROOT, self.code), self._room_info(), retain=True)
+            now = _time.time()
+            for pid, seen in list(self.remote.items()):
+                if now - seen > 12:
+                    self._drop(pid)
+            for _ in range(50):
+                if not self.running:
+                    return
+                _time.sleep(0.1)
+
+    def _on_relay(self, topic, payload):
+        if topic is None:
+            self.relay_status = 'Internet relay lost - LAN only'
+            return
+        m = _decode(payload)
+        if not isinstance(m, dict):
+            return
+        if m.get('t') == 'hello':
+            tok = str(m.get('tok', ''))
+            if tok in self.tokens:                        # our welcome got lost - send it again
+                pid = self.tokens[tok]
+                self.relay.publish(self.base + 'h2c', {'t': 'welcome', 'to': tok, 'id': pid, 'room': self.room_name,
+                                                       'players': [{'id': k, 'name': v} for k, v in self.names.items()]})
+                return
+            why = self._check_hello(m)
+            if why:
+                self.relay.publish(self.base + 'h2c', {'t': 'reject', 'to': tok, 'reason': why})
+                return
+            pid = self._new_player(m.get('name', 'Player'))
+            self.tokens[tok] = pid
+            self.remote[pid] = _time.time()
+            self.relay.publish(self.base + 'h2c', {'t': 'welcome', 'to': tok, 'id': pid, 'room': self.room_name,
+                                                   'players': [{'id': k, 'name': v} for k, v in self.names.items()]})
+            self._joined(pid)
+            return
+        pid = m.get('id')
+        if pid not in self.remote:
+            return
+        self.remote[pid] = _time.time()
+        if m.get('t') == 'leave':
+            self._drop(pid)
+        elif m.get('t') in ('state', 'fw'):
+            self.broadcast(m, exclude=pid)
+            self.inbox.put(m)
+
+    # ---- LAN
     def _discovery_loop(self):
         try:
             u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -200,10 +395,8 @@ class Host:
             except OSError:
                 break
             if data == MAGIC:
-                info = dict(name=self.room_name, players=self.player_count(), max=MAX_PLAYERS,
-                            private=self.private, port=self.port, proto=PROTOCOL)
                 try:
-                    u.sendto(json.dumps(info).encode(), addr)
+                    u.sendto(json.dumps(self._room_info()).encode(), addr)
                 except OSError:
                     pass
         u.close()
@@ -217,38 +410,32 @@ class Host:
             except OSError:
                 break
             sock.settimeout(5.0)
-            threading.Thread(target=self._client_loop, args=(sock,), daemon=True).start()
+            threading.Thread(target=self._tcp_loop, args=(sock,), daemon=True).start()
 
-    def _client_loop(self, sock):
+    def _tcp_loop(self, sock):
         conn = _Conn(sock)
-        cid = None
-        # handshake
+        pid = None
         deadline = _time.time() + 6
-        while cid is None and conn.alive and _time.time() < deadline:
+        while pid is None and conn.alive and _time.time() < deadline:
             msgs = conn.read_lines()
             if msgs is None:
                 break
             for m in msgs:
                 if m.get('t') != 'hello':
                     continue
-                if m.get('proto') != PROTOCOL:
-                    conn.send({'t': 'reject', 'reason': 'Different game version'})
-                elif self.private and str(m.get('code', '')).strip().upper() != self.code:
-                    conn.send({'t': 'reject', 'reason': 'Wrong room code'})
-                elif self.player_count() >= MAX_PLAYERS:
-                    conn.send({'t': 'reject', 'reason': 'Room is full'})
+                why = self._check_hello(m)
+                if not why and clean_code(m.get('code', '')) != self.code:
+                    why = 'Wrong room code'
+                if why:
+                    conn.send({'t': 'reject', 'reason': why})
                 else:
-                    cid = self.next_id
-                    self.next_id += 1
-                    name = str(m.get('name', 'Player'))[:16] or 'Player'
-                    self.names[cid] = name
-                    self.clients[cid] = conn
-                    conn.send({'t': 'welcome', 'id': cid, 'room': self.room_name,
+                    pid = self._new_player(m.get('name', 'Player'))
+                    self.tcp[pid] = conn
+                    conn.send({'t': 'welcome', 'id': pid, 'room': self.room_name,
                                'players': [{'id': k, 'name': v} for k, v in self.names.items()]})
-                    self.broadcast({'t': 'join', 'id': cid, 'name': name}, exclude=cid)
-                    self.inbox.put({'t': 'join', 'id': cid, 'name': name})
+                    self._joined(pid)
                 break
-        if cid is None:
+        if pid is None:
             conn.close()
             return
         sock.settimeout(1.0)
@@ -257,22 +444,38 @@ class Host:
             if msgs is None:
                 break
             for m in msgs:
-                m['id'] = cid
-                if m.get('t') in ('state', 'fw', 'chat'):
-                    self.broadcast(m, exclude=cid)
+                m['id'] = pid
+                if m.get('t') in ('state', 'fw'):
+                    self.broadcast(m, exclude=pid)
                     self.inbox.put(m)
-            if _time.time() - conn.last_rx > 10:
+            if _time.time() - conn.last_rx > 12:
                 break
         conn.close()
-        self.clients.pop(cid, None)
-        self.names.pop(cid, None)
-        self.broadcast({'t': 'leave', 'id': cid})
-        self.inbox.put({'t': 'leave', 'id': cid})
+        self._drop(pid)
+
+    # ---- shared
+    def _joined(self, pid):
+        msg = {'t': 'join', 'id': pid, 'name': self.names.get(pid, 'Player')}
+        self.broadcast(msg, exclude=pid)
+        self.inbox.put(msg)
+
+    def _drop(self, pid):
+        with self.lock:
+            existed = self.tcp.pop(pid, None) is not None or self.remote.pop(pid, None) is not None
+            self.names.pop(pid, None)
+            for tok, p in list(self.tokens.items()):
+                if p == pid:
+                    self.tokens.pop(tok, None)
+        if existed:
+            self.broadcast({'t': 'leave', 'id': pid})
+            self.inbox.put({'t': 'leave', 'id': pid})
 
     def broadcast(self, msg, exclude=None):
-        for cid, c in list(self.clients.items()):
-            if cid != exclude:
+        for pid, c in list(self.tcp.items()):
+            if pid != exclude:
                 c.send(msg)
+        if self.relay is not None and self.remote:
+            self.relay.publish(self.base + 'h2c', msg)       # internet players ignore their own id
 
     def send(self, msg):
         """Messages from the host player itself."""
@@ -282,112 +485,239 @@ class Host:
     def close(self):
         self.running = False
         self.broadcast({'t': 'bye'})
-        for c in list(self.clients.values()):
+        for c in list(self.tcp.values()):
             c.close()
+        if self.relay is not None:
+            if not self.private:
+                self.relay.publish('%s/rooms/%s' % (TOPIC_ROOT, self.code), b'', retain=True)
+            self.relay.close()
         try:
             self.server.close()
-        except OSError:
+        except Exception:
             pass
 
 
-# ------------------------------------------------------------------ client
+# ------------------------------------------------------------------ joining
+def lan_lookup(code_or_hash, wait=1.0):
+    """Asks the local network who hosts this code. Returns (ip, port) or None."""
+    h = code_hash(code_or_hash)
+    for room in lan_scan(wait):
+        if room.get('hash') == h:
+            return room['ip'], room.get('port', PORT)
+    return None
+
+
+def lan_scan(wait=0.9):
+    found = {}
+    try:
+        u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        u.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        u.settimeout(0.3)
+        for target in ('255.255.255.255', '127.0.0.1'):
+            try:
+                u.sendto(MAGIC, (target, DISCOVERY_PORT))
+            except OSError:
+                pass
+        end = _time.time() + wait
+        while _time.time() < end:
+            try:
+                data, addr = u.recvfrom(2048)
+            except socket.timeout:
+                continue
+            info = _decode(data)
+            if not isinstance(info, dict):
+                continue
+            ip = addr[0]
+            if ip.startswith('127.'):
+                ip = local_ip()
+            info['ip'] = ip
+            info['where'] = 'LAN'
+            found[info.get('hash', ip)] = info
+        u.close()
+    except OSError:
+        pass
+    return list(found.values())
+
+
 class Client:
-    def __init__(self, ip, name, code='', port=PORT):
+    """Joins a room by code: tries the local network first, then the internet relay."""
+
+    def __init__(self, code, name):
+        self.code = clean_code(code)
+        if len(self.code) < 4:
+            raise ConnectionError('Room codes are 4-6 characters')
         self.inbox = queue.Queue()
         self.running = True
-        sock = socket.create_connection((ip, port), timeout=4.0)
-        self.conn = _Conn(sock)
-        self.conn.send({'t': 'hello', 'name': name, 'code': code, 'proto': PROTOCOL})
-        deadline = _time.time() + 5.0
         self.id = None
         self.room_name = '?'
         self.players = []
+        self.via = None
+        self.conn = None
+        self.relay = None
+        target = lan_lookup(self.code, 1.0)
+        if target is not None:
+            self._join_lan(target, name)
+        else:
+            self._join_relay(name)
+
+    # ---- LAN path
+    def _join_lan(self, target, name):
+        sock = socket.create_connection(target, timeout=4.0)
+        self.conn = _Conn(sock)
+        self.conn.send({'t': 'hello', 'name': name, 'code': self.code, 'proto': PROTOCOL})
+        deadline = _time.time() + 5.0
         while self.id is None and _time.time() < deadline:
             msgs = self.conn.read_lines()
             if msgs is None:
                 raise ConnectionError('Connection closed by host')
             for m in msgs:
-                if m.get('t') == 'reject':
-                    self.conn.close()
-                    raise ConnectionError(m.get('reason', 'Rejected'))
-                if m.get('t') == 'welcome':
-                    self.id = m['id']
-                    self.room_name = m.get('room', '?')
-                    self.players = m.get('players', [])
+                self._handshake(m)
         if self.id is None:
             self.conn.close()
             raise ConnectionError('No answer from host')
+        self.via = 'LAN'
         sock.settimeout(1.0)
-        threading.Thread(target=self._loop, daemon=True).start()
+        threading.Thread(target=self._lan_loop, daemon=True).start()
 
-    def _loop(self):
+    def _lan_loop(self):
         while self.running and self.conn.alive:
             msgs = self.conn.read_lines()
             if msgs is None:
                 break
             for m in msgs:
                 self.inbox.put(m)
-        self.inbox.put({'t': 'bye'})
+        if self.running:
+            self.inbox.put({'t': 'bye'})
+
+    # ---- internet path
+    def _join_relay(self, name):
+        self.base = '%s/%s/' % (TOPIC_ROOT, self.code)
+        self.tok = ''.join(random.choice('abcdefghijklmnopqrstuvwxyz0123456789') for _ in range(10))
+        self._hs = queue.Queue()
+        self.relay = MqttLink(self._on_relay)
+        self.relay.subscribe(self.base + 'h2c')
+        hello = {'t': 'hello', 'tok': self.tok, 'name': name, 'proto': PROTOCOL}
+        deadline = _time.time() + 7.0
+        next_hello = 0.0
+        while self.id is None and _time.time() < deadline:
+            if _time.time() >= next_hello:
+                self.relay.publish(self.base + 'c2h', hello)
+                next_hello = _time.time() + 1.5
+            try:
+                m = self._hs.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            self._handshake(m)
+        if self.id is None:
+            self.relay.close()
+            raise ConnectionError('No room with code %s is online' % self.code)
+        self.via = 'internet'
+        threading.Thread(target=self._relay_keepalive, daemon=True).start()
+
+    def _on_relay(self, topic, payload):
+        if topic is None:
+            if self.running and self.id is not None:
+                self.inbox.put({'t': 'bye'})
+            return
+        m = _decode(payload)
+        if not isinstance(m, dict):
+            return
+        if self.id is None:
+            if m.get('to') == self.tok:
+                self._hs.put(m)
+            return
+        if m.get('t') in ('welcome', 'reject'):
+            return
+        if m.get('id') == self.id and m.get('t') != 'leave':
+            return
+        self.inbox.put(m)
+
+    def _relay_keepalive(self):
+        while self.running and self.relay is not None and self.relay.alive:
+            _time.sleep(5)
+
+    # ---- shared
+    def _handshake(self, m):
+        if m.get('t') == 'reject':
+            raise ConnectionError(m.get('reason', 'Rejected'))
+        if m.get('t') == 'welcome':
+            self.id = m['id']
+            self.room_name = m.get('room', '?')
+            self.players = m.get('players', [])
 
     def send(self, msg):
         msg['id'] = self.id
-        self.conn.send(msg)
+        if self.conn is not None:
+            self.conn.send(msg)
+        elif self.relay is not None:
+            self.relay.publish(self.base + 'c2h', msg)
 
     def close(self):
         self.running = False
-        self.conn.close()
+        if self.relay is not None:
+            self.relay.publish(self.base + 'c2h', {'t': 'leave', 'id': self.id})
+            self.relay.close()
+        if self.conn is not None:
+            self.conn.close()
 
 
-# ------------------------------------------------------------------ LAN room browser
-class LanBrowser:
-    """Broadcasts discovery pings every 2 s and keeps a list of rooms that answered."""
+# ------------------------------------------------------------------ room list (LAN + internet)
+class RoomBrowser:
+    """Keeps a list of PUBLIC rooms: LAN discovery every 2 s + the internet room list on the relay."""
 
     def __init__(self):
-        self.rooms = {}
+        self.lan = {}
+        self.online = {}
         self.running = True
-        threading.Thread(target=self._loop, daemon=True).start()
+        self.relay = None
+        self.relay_ok = None
+        threading.Thread(target=self._lan, daemon=True).start()
+        threading.Thread(target=self._net, daemon=True).start()
 
-    def _loop(self):
+    def _lan(self):
         while self.running:
-            found = {}
-            try:
-                u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                u.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-                u.settimeout(0.4)
-                for target in ('255.255.255.255', '127.0.0.1'):
-                    try:
-                        u.sendto(MAGIC, (target, DISCOVERY_PORT))
-                    except OSError:
-                        pass
-                end = _time.time() + 0.9
-                while _time.time() < end:
-                    try:
-                        data, addr = u.recvfrom(2048)
-                    except socket.timeout:
-                        continue
-                    try:
-                        info = json.loads(data)
-                    except ValueError:
-                        continue
-                    ip = addr[0]
-                    if ip.startswith('127.'):
-                        ip = local_ip()
-                    info['ip'] = ip
-                    found['%s:%s' % (ip, info.get('port'))] = info
-                u.close()
-            except OSError:
-                pass
-            self.rooms = found
+            self.lan = {r.get('hash'): r for r in lan_scan(0.9)}
             for _ in range(12):
                 if not self.running:
                     return
                 _time.sleep(0.1)
 
+    def _net(self):
+        try:
+            self.relay = MqttLink(self._on_room)
+            self.relay.subscribe('%s/rooms/+' % TOPIC_ROOT)
+            self.relay_ok = True
+        except Exception:
+            self.relay_ok = False
+
+    def _on_room(self, topic, payload):
+        if topic is None:
+            return
+        code = topic.rsplit('/', 1)[-1]
+        info = _decode(payload) if payload else None
+        if not isinstance(info, dict) or info.get('private') or info.get('proto') != PROTOCOL:
+            self.online.pop(code, None)
+            return
+        info['code'] = code
+        info['where'] = 'online'
+        info['seen'] = _time.time()
+        self.online[code] = info
+
     def list(self):
-        return sorted(self.rooms.values(), key=lambda r: (r.get('private', False), r.get('name', '')))
+        rooms = {}
+        now = _time.time()
+        for code, r in list(self.online.items()):
+            if now - r.get('seen', now) < 30:
+                rooms[r.get('hash') or code] = r
+        for h, r in list(self.lan.items()):
+            if not r.get('private'):
+                rooms[h] = r                                # LAN wins (faster connection)
+        return sorted(rooms.values(), key=lambda r: (r.get('where') != 'LAN', r.get('name', '')))
 
     def stop(self):
         self.running = False
+        if self.relay is not None:
+            self.relay.close()
 
 
 # ------------------------------------------------------------------ in-game session
@@ -397,13 +727,14 @@ PLAYER_COLORS = [(230, 60, 60), (60, 130, 240), (60, 200, 90), (240, 190, 40), (
 
 class RemotePlayer:
     def __init__(self, session, pid, name):
-        from ursina import Text, scene, color
+        from ursina import Text, scene
         from npcs import Humanoid
         from world import rgb
         self.s = session
         self.game = session.game
         self.id = pid
-        self.name = name
+        self.name = safe_text(name, 16) or 'Player'
+        name = self.name
         c = PLAYER_COLORS[pid % len(PLAYER_COLORS)]
         self.body = Humanoid(shirt=rgb(*c), pants=rgb(40, 40, 50), cap=rgb(*c))
         self.tag = Text(text=name, parent=scene, origin=(0, 0), scale=12, color=rgb(*c), billboard=True)
@@ -476,9 +807,8 @@ class RemotePlayer:
                 if v.standing:
                     self.body.grips = v.grip_targets()
                 self.body.animate(dt, 0)
-            p = (v.x, v.y, v.z)
             self.tag.position = (v.x, v.y + 2.6, v.z)
-            self.pos = list(p)
+            self.pos = [v.x, v.y, v.z]
         else:
             if self.vehicle is not None:
                 self._drop_vehicle()
@@ -570,9 +900,12 @@ class NetSession:
                 break
             t = m.get('t')
             pid = m.get('id')
+            if pid == self.my_id and t != 'bye':
+                continue
             if t == 'state':
                 if pid not in self.remotes:
-                    self._add(pid, (self.link.names.get(pid) if self.role == 'host' else None) or 'Player %d' % pid)
+                    names = self.link.names if self.role == 'host' else {}
+                    self._add(pid, names.get(pid) or 'Player %d' % pid)
                 if pid in self.remotes:
                     self.remotes[pid].apply(m)
             elif t == 'fw':
@@ -586,7 +919,7 @@ class NetSession:
                 if name:
                     g.hud.notify('%s left the room' % name, rgb(200, 200, 200))
             elif t == 'bye' and self.role == 'client':
-                g.hud.notify('Disconnected from the host - continuing in singleplayer', rgb(255, 120, 90), 6)
+                g.hud.notify('The host closed the room - continuing in singleplayer', rgb(255, 120, 90), 6)
                 g.end_multiplayer()
                 return
         self.send_t += dt
@@ -602,11 +935,9 @@ class NetSession:
         n = 1 + len(self.remotes)
         if self.role == 'host':
             h = self.link
-            txt = 'HOSTING "%s"  %d/%d players  LAN IP %s' % (self.room_name, n, MAX_PLAYERS, local_ip())
-            if self.private:
-                txt += '  CODE %s' % self.code
-            return txt + '\n' + h.upnp_status
-        return 'ONLINE "%s"  %d players' % (self.room_name, n)
+            return 'ROOM CODE %s  -  "%s"  %s  %d/%d players\n%s' % (
+                h.code, self.room_name, 'PRIVATE' if self.private else 'PUBLIC', n, MAX_PLAYERS, h.relay_status)
+        return 'ONLINE "%s"  (%s)  %d players' % (self.room_name, self.link.via, n)
 
     def close(self):
         for pid in list(self.remotes):

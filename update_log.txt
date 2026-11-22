@@ -1,0 +1,16 @@
+2026-11-22 10:38:28 [updater] local version 1.2.0 - checking https://raw.githubusercontent.com/vrmatsvr-hub/ursina-city/main
+2026-11-22 10:38:28 [updater] python 3.13.14 at C:\Users\PC\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe
+2026-11-22 10:38:29 [updater] newest version on GitHub: 1.1.2
+2026-11-22 10:38:29 [updater] you already have the newest version.
+2026-11-22 10:38:34 [updater] local version 1.2.0 - checking https://raw.githubusercontent.com/vrmatsvr-hub/ursina-city/main
+2026-11-22 10:38:34 [updater] python 3.13.14 at C:\Users\PC\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe
+2026-11-22 10:38:34 [updater] newest version on GitHub: 1.1.2
+2026-11-22 10:38:34 [updater] you already have the newest version.
+2026-11-22 10:41:31 [updater] local version 1.2.0 - checking https://raw.githubusercontent.com/vrmatsvr-hub/ursina-city/main
+2026-11-22 10:41:31 [updater] python 3.13.14 at C:\Users\PC\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe
+2026-11-22 10:41:32 [updater] newest version on GitHub: 1.1.2
+2026-11-22 10:41:32 [updater] you already have the newest version.
+2026-11-22 10:41:46 [updater] local version 1.2.0 - checking https://raw.githubusercontent.com/vrmatsvr-hub/ursina-city/main
+2026-11-22 10:41:46 [updater] python 3.13.14 at C:\Users\PC\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe
+2026-11-22 10:41:46 [updater] newest version on GitHub: 1.1.2
+2026-11-22 10:41:46 [updater] you already have the newest version.

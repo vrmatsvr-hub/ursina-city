@@ -26,7 +26,7 @@ MOTOR_TIERS = [
     dict(watt=3000, price=1300, top_kmh=68, accel=7.8),
     dict(watt=8000, price=3800, top_kmh=108, accel=12.0),
 ]
-# KuKirin G2 standing e-step: starts stock at 1500W / 55 km/h
+# KuKirin G2 standing e-scooter: starts stock at 1500W / 55 km/h
 KICK_MOTOR_TIERS = [
     dict(watt=1500, price=0, top_kmh=55, accel=5.8),
     dict(watt=2400, price=900, top_kmh=68, accel=7.4),
@@ -204,7 +204,7 @@ def build_car(spec, kind, body):
 
 
 def build_kukirin_g2(primary, accent):
-    """KuKirin G2 standing e-step: long grip-taped deck, C-fork, swingarm, tall raked stem."""
+    """KuKirin G2 standing e-scooter: long grip-taped deck, C-fork, swingarm, tall raked stem."""
     ch, fk, hd = MeshBuilder(), MeshBuilder(), MeshBuilder()
     black = rgb(20, 20, 22)
     metal = rgb(120, 124, 130)
@@ -1067,7 +1067,7 @@ class DriftScore:
         if cash >= 5:
             bonus = int(cash * 0.1 * (self.mult - 1))      # clean-finish combo bonus
             self.game.player.add_cash(cash + bonus, 'CLEAN DRIFT x%d' % self.mult)
-            self.game.hud.notify('Drift banked: %d pts  ->  $%d%s' % (self.points, cash + bonus,
+            self.game.hud.notify('Drift banked: %d pts  =  $%d%s' % (self.points, cash + bonus,
                                  ('  (+$%d combo bonus)' % bonus) if bonus else ''), rgb(255, 200, 60))
         self.points = 0.0
         self.mult = 1

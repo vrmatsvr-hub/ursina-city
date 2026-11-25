@@ -593,7 +593,8 @@ class HUD:
         for rc in ROADS:
             self.map_ents.append(Entity(parent=ui, model='quad', position=(cx + rc * k, cy), scale=(ROAD_W * k, span), color=rgb(42, 44, 48), z=0.27))
             self.map_ents.append(Entity(parent=ui, model='quad', position=(cx, cy + rc * k), scale=(span, ROAD_W * k), color=rgb(42, 44, 48), z=0.27))
-        poi_cols = {'shop': rgb(255, 220, 40), 'garage': rgb(0, 220, 255), 'dealer': rgb(255, 120, 20), 'business': rgb(200, 90, 255)}
+        poi_cols = {'shop': rgb(255, 220, 40), 'garage': rgb(0, 220, 255), 'dealer': rgb(255, 120, 20), 'business': rgb(200, 90, 255),
+                    'stunt': rgb(255, 70, 40), 'industrial': rgb(170, 170, 170), 'field': rgb(120, 255, 120)}
         for (x, z, kind) in self.game.world.pois:
             self.map_ents.append(Entity(parent=ui, model='quad', position=(cx + x * k, cy + z * k), scale=0.012,
                                         color=poi_cols.get(kind, color.white), z=0.2, rotation_z=45 if kind == 'business' else 0))
@@ -646,8 +647,9 @@ class HUD:
         quad(cx, cy, land, land, rgb(58, 96, 52), -0.43)                               # dike / grass
         span = (ASPHALT_MAX - ASPHALT_MIN) * k
         quad(cx, cy, span, span, rgb(52, 54, 58), -0.44)                               # asphalt
-        lot_cols = {'park': rgb(70, 140, 60), 'parking': rgb(88, 90, 96), 'shop': rgb(150, 130, 40),
-                    'garage': rgb(20, 120, 140), 'business': rgb(110, 60, 150)}
+        lot_cols = {'park': rgb(70, 140, 60), 'park2': rgb(70, 140, 60), 'parking': rgb(88, 90, 96), 'shop': rgb(150, 130, 40),
+                    'garage': rgb(20, 120, 140), 'business': rgb(110, 60, 150), 'industrial': rgb(96, 92, 86),
+                    'stunt': rgb(170, 90, 40), 'field': rgb(60, 150, 60)}
         for i in range(N_BLOCKS):
             for j in range(N_BLOCKS):
                 x0, z0 = ROADS[i] + HALF_ROAD, ROADS[j] + HALF_ROAD
@@ -665,14 +667,16 @@ class HUD:
                     t = Text(text=name, parent=ui, position=(cx + mx * k, cy + mz * k), origin=(0, 0), scale=0.62,
                              color=rgb(255, 255, 255), z=-0.47)
                     E.append(t)
-                elif spec[0] in ('park', 'garage', 'parking'):
-                    t = Text(text={'park': 'PARK', 'garage': 'E-TUNING', 'parking': 'PARKING'}[spec[0]], parent=ui,
+                elif spec[0] in ('park', 'park2', 'garage', 'parking', 'industrial', 'stunt', 'field'):
+                    t = Text(text={'park': 'PARK', 'park2': 'POND PARK', 'garage': 'E-TUNING', 'parking': 'PARKING',
+                                   'industrial': 'DOCKS', 'stunt': 'STUNT PARK', 'field': 'FOOTBALL'}[spec[0]], parent=ui,
                              position=(cx + mx * k, cy + mz * k), origin=(0, 0), scale=0.62, color=rgb(255, 255, 255), z=-0.47)
                     E.append(t)
         for rc in ROADS:                                                               # lane markings
             quad(cx + rc * k, cy, 0.0015, span, rgb(220, 210, 120, 140), -0.455)
             quad(cx, cy + rc * k, span, 0.0015, rgb(220, 210, 120, 140), -0.455)
-        poi_cols = {'shop': rgb(255, 220, 40), 'garage': rgb(0, 220, 255), 'dealer': rgb(255, 120, 20), 'business': rgb(200, 90, 255)}
+        poi_cols = {'shop': rgb(255, 220, 40), 'garage': rgb(0, 220, 255), 'dealer': rgb(255, 120, 20), 'business': rgb(200, 90, 255),
+                    'stunt': rgb(255, 70, 40), 'industrial': rgb(170, 170, 170), 'field': rgb(120, 255, 120)}
         for (x, z, kind) in g.world.pois:
             quad(cx + x * k, cy + z * k, 0.018, 0.018, poi_cols.get(kind, color.white), -0.48,
                  rotation_z=45 if kind == 'business' else 0)
@@ -692,7 +696,7 @@ class HUD:
                       color=rgb(255, 150, 40), z=-0.42))
         rows = [('You', rgb(255, 255, 255)), ('Shop - rob it', rgb(255, 220, 40)), ('Fireworks dealer', rgb(255, 120, 20)),
                 ('E-Tuning garage', rgb(0, 220, 255)), ('Business for sale', rgb(200, 90, 255)),
-                ('Time-trial start', rgb(60, 130, 255)), ('Courier pickup', rgb(60, 255, 100)),
+                ('Time-trial start', rgb(60, 130, 255)), ('Stunt park - jumps', rgb(255, 70, 40)), ('Courier pickup', rgb(60, 255, 100)),
                 ('Courier drop-off', rgb(255, 220, 40)), ('Police', rgb(255, 40, 40))]
         y = s / 2 - 0.13
         for name, col in rows:

@@ -1179,10 +1179,12 @@ class CourierJobs:
 
 # race routes follow the road grid (consecutive nodes share a row or column)
 RACES = [
-    dict(name='Outer Ring Sprint', prize=900,
-         route=[(0, 0), (5, 0), (5, 5), (0, 5), (0, 0)]),
-    dict(name='City Loop', prize=700,
-         route=[(1, 1), (4, 1), (4, 4), (1, 4), (1, 2), (3, 2), (3, 3), (2, 3), (2, 1)]),
+    dict(name='Outer Ring Sprint', prize=1300,
+         route=[(0, 0), (7, 0), (7, 7), (0, 7), (0, 0)]),
+    dict(name='City Loop', prize=900,
+         route=[(2, 2), (5, 2), (5, 5), (2, 5), (2, 3), (4, 3), (4, 4), (3, 4), (3, 2)]),
+    dict(name='Downtown Dash', prize=650,
+         route=[(3, 3), (4, 3), (4, 4), (3, 4), (3, 3)]),
 ]
 
 

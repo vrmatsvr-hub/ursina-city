@@ -19,6 +19,19 @@ throw heavy fireworks and play with friends using just a room code.
 
 ---
 
+## 🆕 What's new in 2.0
+
+- **Twice the city** – 7 × 7 blocks: a downtown of glass skyscrapers (up to 90 m) around the central park, quiet
+  row-house outskirts, **docks** with a warehouse, stacked shipping containers and a gantry crane, a **stunt park**
+  with a gap jump, kickers and a wall ride, a **football field** with a stand and floodlights, a pond park and trees
+  along every street.
+- **Real car physics** – a tyre model with slip angles, weight transfer, wheelspin and a friction ellipse. Handbrake
+  or too much power breaks the rear loose, counter-steer and throttle hold the drift. Cars dive under braking,
+  squat on throttle and lean in corners. Ramps launch you, corner crashes spin you around.
+- **New models** – rounded car bodies with wheel arches, 5-spoke rims with brake discs, mirrors, grilles, light
+  units, diffusers and spoilers; a proper van; people with faces, hair styles, hands, shoes and clothing variety.
+- New time trial: **Downtown Dash**.
+
 ## 📸 Screenshots
 
 <table>

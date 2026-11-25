@@ -45,7 +45,7 @@ except Exception:          # numpy is optional - the game runs silently without 
 
 
 # ============================================================== constants
-N_BLOCKS = 5                       # 5 x 5 city blocks
+N_BLOCKS = 7                       # 7 x 7 city blocks
 CELL = 52.0                        # road centre to road centre
 ROAD_W = 12.0
 HALF_ROAD = ROAD_W / 2.0
@@ -1346,21 +1346,29 @@ POLE = rgb(46, 50, 54)
 
 #               lot      type        name                    kind / price, income per minute
 LOT_SPECIAL = {
-    (2, 2): ('park',),
-    (1, 2): ('shop', 'CORNER SHOP', 'convenience'),
-    (3, 1): ('shop', 'ELECTRONICS', 'electronics'),
-    (2, 0): ('shop', 'JEWELRY STORE', 'jewelry'),
-    (3, 3): ('garage',),
-    (1, 1): ('business', 'KEBAB & SNACK BAR', 2500, 150),
-    (1, 3): ('business', 'CAR WASH', 6000, 360),
-    (2, 4): ('business', 'TOUCAN COFFEE SHOP', 12000, 700),
-    (0, 2): ('business', 'E-SCOOTER RENTAL', 4000, 240),
-    (4, 2): ('business', 'NIGHTCLUB BASS', 20000, 1150),
-    (0, 1): ('shop', 'NIGHT SHOP', 'convenience'),
-    (4, 3): ('shop', 'GAS STATION', 'gas'),
-    (4, 0): ('parking',),
-    (0, 4): ('parking',),
+    (3, 3): ('park',),
+    (2, 3): ('shop', 'CORNER SHOP', 'convenience'),
+    (4, 2): ('shop', 'ELECTRONICS', 'electronics'),
+    (3, 1): ('shop', 'JEWELRY STORE', 'jewelry'),
+    (4, 4): ('garage',),
+    (2, 2): ('business', 'KEBAB & SNACK BAR', 2500, 150),
+    (2, 4): ('business', 'CAR WASH', 6000, 360),
+    (3, 5): ('business', 'TOUCAN COFFEE SHOP', 12000, 700),
+    (1, 3): ('business', 'E-SCOOTER RENTAL', 4000, 240),
+    (5, 3): ('business', 'NIGHTCLUB BASS', 20000, 1150),
+    (1, 2): ('shop', 'NIGHT SHOP', 'convenience'),
+    (5, 4): ('shop', 'GAS STATION', 'gas'),
+    (5, 1): ('parking',),
+    (1, 5): ('parking',),
+    # new districts
+    (0, 0): ('industrial',),
+    (1, 0): ('industrial',),
+    (0, 1): ('industrial',),
+    (6, 6): ('stunt',),
+    (0, 6): ('field',),
+    (6, 0): ('park2',),
 }
+DOWNTOWN_RADIUS = 1.5                 # lots this close to the centre get skyscrapers
 
 SKY_KEYS = [
     # hour  zenith               horizon              sun colour          ambient               ground bounce
@@ -1400,6 +1408,8 @@ class World:
         self.prop_spots = []
         self.pois = []
         self.bumps = []
+        self.ramps = []                         # stunt park: (x0, z0, x1, z1, h_start, h_end, along_z)
+        self.ramp_box = None
         self.featured_spawns = []
         self._init_shader_inputs()
         self.lights = LightManager(self)
@@ -1443,6 +1453,12 @@ class World:
             if bx0 <= x <= bx1 and bz0 <= z <= bz1:
                 t = ((z - bz0) / (bz1 - bz0)) if along_z else ((x - bx0) / (bx1 - bx0))
                 h = max(h, bh * (1.0 - abs(t * 2.0 - 1.0)))
+        rb = self.ramp_box
+        if rb is not None and rb[0] <= x <= rb[2] and rb[1] <= z <= rb[3]:
+            for (rx0, rz0, rx1, rz1, h0, h1, along_z) in self.ramps:
+                if rx0 <= x <= rx1 and rz0 <= z <= rz1:
+                    t = ((z - rz0) / (rz1 - rz0)) if along_z else ((x - rx0) / (rx1 - rx0))
+                    h = max(h, CURB_H + h0 + (h1 - h0) * t)
         return h
 
     def is_road(self, x, z):
@@ -1623,15 +1639,35 @@ class World:
 
         spec = LOT_SPECIAL.get((i, j))
         c = (N_BLOCKS - 1) / 2.0
-        tall = 1.0 + max(0.0, 1.6 - 0.55 * math.hypot(i - c, j - c))
+        dist = math.hypot(i - c, j - c)
+        tall = 1.0 + max(0.0, 2.0 - 0.55 * dist)
+        open_lot = spec is not None and spec[0] in ('park', 'park2', 'parking', 'stunt', 'industrial', 'field')
+        if spec is None or spec[0] in ('park', 'park2', 'field'):
+            self._street_trees(B, i, j)
         if spec is None:
-            if random.random() < 0.5:
+            if dist <= DOWNTOWN_RADIUS:
+                self._skyscrapers(B, inner)
+            elif dist >= 2.6 and random.random() < 0.75:
+                self._rowhouses(B, inner)              # quieter residential outskirts
+            elif random.random() < 0.4:
                 self._rowhouses(B, inner)
             else:
                 self._blocks(B, inner, tall)
             return
         kind = spec[0]
         side = self._facing(i, j)
+        if kind == 'industrial':
+            self._industrial(B, inner)
+            return
+        if kind == 'stunt':
+            self._stunt_park(B, inner)
+            return
+        if kind == 'field':
+            self._football_field(B, inner)
+            return
+        if kind == 'park2':
+            self._park2(B, inner)
+            return
         if kind == 'park':
             self._park(B, inner)
         elif kind == 'parking':
@@ -1869,9 +1905,325 @@ class World:
         self.player_spawn = (cx - 2.0, CURB_H, iz0 - 1.6)
         self.hospital_spawn = self.player_spawn
         # starter vehicles parked by the curb right in front of the park
-        rz = ROADS[2] + 5.0
+        rz = iz0 - SIDEWALK - HALF_ROAD + 5.0         # the road just south of the park
         self.featured_spawns = [('kickscooter', cx - 12.5, rz, -90.0), ('scooter', cx - 9.0, rz, -90.0), ('motorbike', cx - 5.5, rz, -90.0),
                                 ('sports', cx + 4.0, rz, -90.0)]
+
+    # ================================================================= new districts
+    def _street_trees(self, B, i, j):
+        """Trees along the sidewalk, away from the zebra crossings at the corners."""
+        x0, z0, x1, z1 = self.lot_rect(i, j)
+        o = 0.95
+        for (ax, az, bx, bz) in ((x0, z0 + o, x1, z0 + o), (x0, z1 - o, x1, z1 - o),
+                                 (x0 + o, z0, x0 + o, z1), (x1 - o, z0, x1 - o, z1)):
+            L = math.hypot(bx - ax, bz - az)
+            t = 8.0
+            while t < L - 8.0:
+                k = t / L
+                self._tree(B, ax + (bx - ax) * k, az + (bz - az) * k, random.uniform(0.75, 1.0))
+                t += random.uniform(11.0, 15.0)
+
+    def _skyscrapers(self, B, inner):
+        """Downtown: glass towers with a podium, setbacks, a crown and an aviation light."""
+        ix0, iz0, ix1, iz1 = inner
+        w, d = ix1 - ix0, iz1 - iz0
+        if random.random() < 0.5:
+            parts = [(ix0 + 1, iz0 + 1, ix1 - 1, iz1 - 1)]
+        elif w >= d:
+            m = (ix0 + ix1) / 2
+            parts = [(ix0 + 1, iz0 + 1, m - 1.5, iz1 - 1), (m + 1.5, iz0 + 1, ix1 - 1, iz1 - 1)]
+        else:
+            m = (iz0 + iz1) / 2
+            parts = [(ix0 + 1, iz0 + 1, ix1 - 1, m - 1.5), (ix0 + 1, m + 1.5, ix1 - 1, iz1 - 1)]
+        for p in parts:
+            self._glass_tower(B, p, random.uniform(42.0, 90.0) / (1.0 if len(parts) == 1 else 1.25))
+
+    def _glass_tower(self, B, rect, h):
+        x0, z0, x1, z1 = rect
+        base = CURB_H
+        glass = random.choice((rgb(52, 78, 104), rgb(40, 62, 80), rgb(70, 96, 110), rgb(36, 54, 70), rgb(92, 110, 120)))
+        frame = random.choice((rgb(170, 176, 182), rgb(60, 64, 70), rgb(200, 196, 186), rgb(40, 42, 46)))
+        # podium: a 2-storey stone base with lit shop windows
+        pod_h = 7.5
+        cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
+        B['bld'].box((cx, base + pod_h / 2, cz), (x1 - x0, pod_h, z1 - z0), rgb(150, 146, 138), top_col=ROOF_COL)
+        self._facade_windows(B, x0, z0, x1, z1, base - 3.0, pod_h + 2.0, modern=True)
+        self.collision.add(x0, -5, z0, x1, base + pod_h, z1)
+        # tiers with setbacks
+        y = base + pod_h
+        tiers = random.choice(((0.62, 0.28, 0.10), (0.75, 0.25), (1.0,), (0.5, 0.3, 0.2)))
+        inset = random.uniform(1.0, 2.0)
+        bx0, bz0, bx1, bz1 = x0 + inset, z0 + inset, x1 - inset, z1 - inset
+        for k, frac in enumerate(tiers):
+            th = (h - pod_h) * frac
+            if bx1 - bx0 < 5 or bz1 - bz0 < 5:
+                break
+            tcx, tcz = (bx0 + bx1) / 2, (bz0 + bz1) / 2
+            tw, td = bx1 - bx0, bz1 - bz0
+            B['glass'].box((tcx, y + th / 2, tcz), (tw, th, td), glass)
+            # vertical mullions + floor bands make it read as a curtain wall
+            for f in range(1, int(th / 3.6)):
+                yy = y + f * 3.6
+                B['bld'].box((tcx, yy, tcz), (tw + 0.12, 0.22, td + 0.12), frame)
+            nm = max(2, int(tw / 3.2))
+            for m in range(nm + 1):
+                xx = bx0 + tw * m / nm
+                for zz in (bz0 - 0.05, bz1 + 0.05):
+                    B['bld'].box((xx, y + th / 2, zz), (0.18, th, 0.12), frame)
+            nm = max(2, int(td / 3.2))
+            for m in range(nm + 1):
+                zz = bz0 + td * m / nm
+                for xx in (bx0 - 0.05, bx1 + 0.05):
+                    B['bld'].box((xx, y + th / 2, zz), (0.12, th, 0.18), frame)
+            # lit offices at night
+            for f in range(int(th / 3.6)):
+                yy = y + f * 3.6 + 1.8
+                for (ax, az, bx, bz, n) in ((bx0, bz0 - 0.08, bx1, bz0 - 0.08, (0, 0, -1)), (bx1, bz1 + 0.08, bx0, bz1 + 0.08, (0, 0, 1)),
+                                            (bx0 - 0.08, bz1, bx0 - 0.08, bz0, (-1, 0, 0)), (bx1 + 0.08, bz0, bx1 + 0.08, bz1, (1, 0, 0))):
+                    L = math.hypot(bx - ax, bz - az)
+                    along = ((bx - ax) / L, 0.0, (bz - az) / L)
+                    t = 1.6
+                    while t < L - 1.6:
+                        if random.random() < 0.33:
+                            run = min(random.uniform(3.0, 8.0), L - 1.6 - t)
+                            c = (ax + along[0] * (t + run / 2), yy, az + along[2] * (t + run / 2))
+                            B['winlit'].face_quad(c, along, (0, 1, 0), n, run, 2.2,
+                                                  random.choice((Color(1, 1, 1, 1), Color(0.86, 0.94, 1, 1), Color(1, 0.93, 0.8, 1))), 0.02)
+                            t += run + random.uniform(1.0, 4.0)
+                        else:
+                            t += random.uniform(3.0, 7.0)
+            self.collision.add(bx0, base, bz0, bx1, y + th, bz1)
+            y += th
+            s = random.uniform(1.6, 3.2)
+            bx0, bz0, bx1, bz1 = bx0 + s, bz0 + s, bx1 - s, bz1 - s
+        # crown, rooftop plant and aviation light
+        tcx, tcz = (bx0 + bx1) / 2, (bz0 + bz1) / 2
+        B['bld'].box((tcx, y + 0.6, tcz), (max(3, bx1 - bx0 + 2), 1.2, max(3, bz1 - bz0 + 2)), frame)
+        B['misc'].box((tcx + 1.0, y + 2.2, tcz - 0.8), (2.6, 2.0, 2.0), rgb(150, 152, 155))
+        if random.random() < 0.6:
+            B['misc'].cylinder((tcx, y + 9.0, tcz), 0.12, 16.0, POLE, seg=6, radius_top=0.05)
+            B['neon'].sphere((tcx, y + 17.2, tcz), 0.35, rgb(255, 30, 20), 3, 6)
+        else:
+            B['neon'].sphere((tcx, y + 1.5, tcz), 0.35, rgb(255, 30, 20), 3, 6)
+
+    def _industrial(self, B, inner):
+        """Docks / industry: warehouses, stacked shipping containers, a gantry crane, a fence."""
+        ix0, iz0, ix1, iz1 = inner
+        base = CURB_H
+        B['side'].rect_xz(ix0, iz0, ix1, iz1, base + 0.012, rgb(86, 86, 84))
+        for k in range(6):                                                            # painted yard lines
+            zz = iz0 + 4 + k * (iz1 - iz0 - 8) / 5
+            B['side'].rect_xz(ix0 + 2, zz - 0.06, ix1 - 2, zz + 0.06, base + 0.02, rgb(220, 190, 40))
+        cx, cz = (ix0 + ix1) / 2, (iz0 + iz1) / 2
+        # warehouse with corrugated walls, roller doors and a sawtooth roof
+        wx0, wz0, wx1, wz1 = ix0 + 1, iz0 + 1, ix0 + (ix1 - ix0) * 0.55, iz1 - 1
+        wh = random.uniform(9.0, 12.0)
+        wall = random.choice((rgb(120, 128, 136), rgb(150, 120, 90), rgb(96, 110, 96), rgb(170, 170, 165)))
+        wcx, wcz = (wx0 + wx1) / 2, (wz0 + wz1) / 2
+        B['bld'].box((wcx, base + wh / 2, wcz), (wx1 - wx0, wh, wz1 - wz0), wall, top_col=ROOF_COL)
+        x = wx0 + 0.5
+        while x < wx1:
+            for zz in (wz0 - 0.04, wz1 + 0.04):
+                B['bld'].box((x, base + wh / 2, zz), (0.16, wh, 0.1), col_mul(wall, 0.82))
+            x += 0.9
+        z = wz0 + 0.5
+        while z < wz1:
+            B['bld'].box((wx1 + 0.04, base + wh / 2, z), (0.1, wh, 0.16), col_mul(wall, 0.82))
+            z += 0.9
+        for k in range(3):
+            zc = wz0 + (k + 0.5) * (wz1 - wz0) / 3
+            B['misc'].box((wx1 + 0.08, base + 2.4, zc), (0.12, 4.6, 4.2), rgb(70, 72, 76))     # roller door
+            for s in range(9):
+                B['misc'].box((wx1 + 0.15, base + 0.4 + s * 0.5, zc), (0.04, 0.05, 4.2), rgb(50, 52, 56))
+            B['lamps'].box((wx1 + 0.3, base + 5.2, zc), (0.3, 0.2, 0.6), Color(1, 0.95, 0.8, 1))
+            self.interior_lights.append(((wx1 + 2.0, base + 4.5, zc), (1.0, 0.9, 0.7), 9.0))
+        n_saw = max(2, int((wz1 - wz0) / 6))
+        for k in range(n_saw):
+            za, zb = wz0 + k * (wz1 - wz0) / n_saw, wz0 + (k + 1) * (wz1 - wz0) / n_saw
+            yb = base + wh
+            B['bld'].hexa([(wx0, yb, za), (wx1, yb, za), (wx1, yb, zb), (wx0, yb, zb),
+                           (wx0, yb, za), (wx1, yb, za), (wx1, yb + 2.2, zb - 0.3), (wx0, yb + 2.2, zb - 0.3)], ROOF_COL)
+            B['glass'].face_quad((wcx, yb + 1.1, zb - 0.15), (1, 0, 0), (0, 1, 0), (0, 0, 1), wx1 - wx0 - 0.4, 2.0, GLASS_DARK, 0.02)
+        self.collision.add(wx0, -5, wz0, wx1, base + wh + 2.2, wz1)
+        # container yard
+        cols = (rgb(190, 50, 40), rgb(40, 90, 160), rgb(220, 150, 30), rgb(40, 130, 80), rgb(120, 120, 126), rgb(230, 230, 228),
+                rgb(110, 60, 120), rgb(200, 90, 30))
+        yx0 = wx1 + 7.0
+        zz = iz0 + 2.0
+        while zz + 2.6 < iz1 - 2.0:
+            if random.random() < 0.8:
+                xx = yx0 + random.uniform(0, 1.5)
+                stack = random.choice((1, 1, 2, 2, 3))
+                for s in range(stack):
+                    self._container(B, xx + 3.05, base + s * 2.6, zz + 1.25, random.choice(cols))
+                self.collision.add(xx, base, zz, xx + 6.1, base + stack * 2.6, zz + 2.5)
+            zz += 3.2
+        # gantry crane over the yard
+        gx0, gx1 = yx0 - 1.5, min(ix1 - 0.8, yx0 + 9.5)
+        gz = cz + random.uniform(-6, 6)
+        ch = 16.0
+        crane = rgb(230, 170, 20)
+        for gxx in (gx0, gx1):
+            for dz in (-3.0, 3.0):
+                B['misc'].box((gxx, base + ch / 2, gz + dz), (0.6, ch, 0.6), crane)
+                self.collision.add(gxx - 0.3, base, gz + dz - 0.3, gxx + 0.3, base + ch, gz + dz + 0.3)
+            B['misc'].box((gxx, base + ch - 0.4, gz), (0.7, 0.8, 6.6), crane)
+        for dz in (-3.0, 3.0):
+            B['misc'].box(((gx0 + gx1) / 2, base + ch + 0.4, gz + dz), (gx1 - gx0 + 1.2, 1.0, 0.7), crane)
+        B['misc'].box(((gx0 + gx1) / 2 + 1.5, base + ch - 0.4, gz), (2.4, 1.6, 2.4), rgb(60, 62, 66))
+        B['misc'].cylinder(((gx0 + gx1) / 2 + 1.5, base + ch - 5.0, gz), 0.05, 8.0, rgb(30, 30, 30), seg=4)
+        B['neon'].sphere(((gx0 + gx1) / 2, base + ch + 1.2, gz), 0.3, rgb(255, 120, 0), 3, 6)
+        # fence posts along the back, barrels and pallets as knock-over props
+        for k in range(int((ix1 - ix0) / 2.5)):
+            px = ix0 + 1 + k * 2.5
+            B['misc'].cylinder((px, base + 1.0, iz1 - 0.4), 0.05, 2.0, POLE, seg=5)
+        B['misc'].box(((ix0 + ix1) / 2, base + 1.9, iz1 - 0.4), (ix1 - ix0 - 2, 0.05, 0.05), POLE)
+        B['misc'].box(((ix0 + ix1) / 2, base + 1.0, iz1 - 0.4), (ix1 - ix0 - 2, 1.8, 0.02), rgb(120, 126, 130, 255))
+        self.collision.add(ix0, base, iz1 - 0.5, ix1, base + 2.0, iz1 - 0.3)
+        for _ in range(6):
+            self.prop_spots.append((random.choice(('crate', 'box', 'crate')), random.uniform(wx1 + 2, yx0 - 1.5),
+                                    random.uniform(iz0 + 2, iz1 - 3)))
+        self.pois.append((cx, cz, 'industrial'))
+
+    def _container(self, B, x, y, z, col):
+        L, W, H = 6.1, 2.5, 2.6
+        B['bld'].box((x, y + H / 2, z), (L, H, W), col, top_col=col_mul(col, 0.9))
+        k = 0.0
+        while k < L - 0.2:                                               # corrugation ribs
+            B['bld'].box((x - L / 2 + 0.2 + k, y + H / 2, z - W / 2 - 0.03), (0.12, H - 0.25, 0.06), col_mul(col, 0.8))
+            B['bld'].box((x - L / 2 + 0.2 + k, y + H / 2, z + W / 2 + 0.03), (0.12, H - 0.25, 0.06), col_mul(col, 0.8))
+            k += 0.45
+        for s in (-1, 1):                                                # door end with locking bars
+            B['bld'].box((x + s * (L / 2 + 0.02), y + H / 2, z), (0.06, H - 0.1, W - 0.1), col_mul(col, 0.7))
+        for b in (-0.6, -0.2, 0.2, 0.6):
+            B['misc'].box((x + L / 2 + 0.07, y + H / 2, z + b), (0.05, H - 0.4, 0.05), rgb(60, 60, 60))
+
+    def _stunt_park(self, B, inner):
+        """Concrete stunt park: kickers, a big gap jump, a bowl wall and mini ramps for e-scooters.
+        The ramps are real ground (ground_height), so cars and bikes actually launch off them."""
+        ix0, iz0, ix1, iz1 = inner
+        base = CURB_H
+        B['side'].rect_xz(ix0, iz0, ix1, iz1, base + 0.012, rgb(150, 150, 146))
+        self.ramp_box = (ix0, iz0, ix1, iz1)
+        cx, cz = (ix0 + ix1) / 2, (iz0 + iz1) / 2
+        stripe = (rgb(240, 190, 20), rgb(30, 30, 32))
+
+        def ramp(x0, z0, x1, z1, h0, h1, along_z, back=True):
+            self.ramps.append((x0, z0, x1, z1, h0, h1, along_z))
+            n = 8
+            for s in range(n):                                       # striped deck, built in slices
+                ta, tb = s / n, (s + 1) / n
+                ya, yb = base + h0 + (h1 - h0) * ta, base + h0 + (h1 - h0) * tb
+                col = stripe[s % 2] if s in (0, n - 1) else rgb(176, 176, 172)
+                if along_z:
+                    za, zb = z0 + (z1 - z0) * ta, z0 + (z1 - z0) * tb
+                    B['misc'].hexa([(x0, base, za), (x1, base, za), (x1, base, zb), (x0, base, zb),
+                                    (x0, ya, za), (x1, ya, za), (x1, yb, zb), (x0, yb, zb)], col)
+                else:
+                    xa, xb = x0 + (x1 - x0) * ta, x0 + (x1 - x0) * tb
+                    B['misc'].hexa([(xa, base, z0), (xb, base, z0), (xb, base, z1), (xa, base, z1),
+                                    (xa, ya, z0), (xb, yb, z0), (xb, yb, z1), (xa, ya, z1)], col)
+            if back:                                                 # the vertical back stops you driving up the wrong way
+                hi = max(h0, h1)
+                if along_z:
+                    zb = z1 if h1 > h0 else z0
+                    self.collision.add(x0, base - 1, zb - 0.15 if h1 > h0 else zb, x1, base + max(0.3, hi - 1.0), zb if h1 > h0 else zb + 0.15)
+                else:
+                    xb = x1 if h1 > h0 else x0
+                    self.collision.add(xb - 0.15 if h1 > h0 else xb, base - 1, z0, xb if h1 > h0 else xb + 0.15, base + max(0.3, hi - 1.0), z1)
+
+        # big gap jump along z through the middle: run-up, 9 m gap, landing
+        ramp(cx - 3.5, iz0 + 2.0, cx + 3.5, iz0 + 11.0, 0.0, 2.3, True)
+        ramp(cx - 4.0, iz0 + 20.0, cx + 4.0, iz0 + 31.0, 2.3, 0.0, True)
+        B['neon'].box((cx, base + 2.36, iz0 + 10.9), (7.0, 0.08, 0.2), rgb(255, 120, 20))
+        # side kickers
+        ramp(ix0 + 2.0, cz - 2.5, ix0 + 7.5, cz + 2.5, 0.0, 1.3, False)
+        ramp(ix1 - 7.5, cz - 2.5, ix1 - 2.0, cz + 2.5, 1.3, 0.0, False)
+        # mini kickers for scooters
+        for k in range(3):
+            zz = iz1 - 4.0 - k * 4.5
+            ramp(ix0 + 3.0, zz - 1.0, ix0 + 5.0, zz + 1.0, 0.0, 0.45, False, back=False)
+        # quarter-pipe style wall at the far end
+        ramp(cx - 6.0, iz1 - 6.0, cx + 6.0, iz1 - 1.0, 0.0, 2.6, True)
+        # floodlights + a sign
+        for (lx, lz) in ((ix0 + 1, iz0 + 1), (ix1 - 1, iz1 - 1)):
+            B['misc'].cylinder((lx, base + 5.0, lz), 0.12, 10.0, POLE, seg=6)
+            B['lamps'].box((lx, base + 10.1, lz), (1.2, 0.4, 0.6), Color(1, 0.97, 0.9, 1))
+            self.lamps.append((lx, base + 9.8, lz))
+        self.featured_spawns.append(('motorbike', ix0 + 4.0, iz0 + 3.5, 0.0))
+        self.featured_spawns.append(('sports', ix0 + 8.0, iz0 + 4.0, 0.0))
+        world_text('STUNT PARK', (cx, base + 4.6, iz0 - 0.2), 0, 0.9, rgb(255, 140, 30))
+        B['misc'].box((cx, base + 4.6, iz0 - 0.1), (8.0, 1.4, 0.12), rgb(20, 20, 22))
+        for s in (-1, 1):
+            B['misc'].cylinder((cx + s * 3.8, base + 2.0, iz0 - 0.1), 0.08, 4.0, POLE, seg=5)
+        self.pois.append((cx, cz, 'stunt'))
+
+    def _football_field(self, B, inner):
+        ix0, iz0, ix1, iz1 = inner
+        base = CURB_H
+        B['side'].rect_xz(ix0, iz0, ix1, iz1, base + 0.012, rgb(60, 130, 56))
+        fx0, fz0, fx1, fz1 = ix0 + 3, iz0 + 2, ix1 - 8, iz1 - 2
+        for k in range(8):                                                  # mowing stripes
+            a, b = fz0 + (fz1 - fz0) * k / 8, fz0 + (fz1 - fz0) * (k + 1) / 8
+            B['side'].rect_xz(fx0, a, fx1, b, base + 0.016, rgb(70, 146, 62) if k % 2 else rgb(62, 134, 56))
+        line = rgb(240, 240, 236)
+        y = base + 0.024
+        for (a0, b0, a1, b1) in ((fx0, fz0, fx1, fz0 + 0.12), (fx0, fz1 - 0.12, fx1, fz1), (fx0, fz0, fx0 + 0.12, fz1),
+                                 (fx1 - 0.12, fz0, fx1, fz1), ((fx0 + fx1) / 2 - 0.06, fz0, (fx0 + fx1) / 2 + 0.06, fz1)):
+            B['side'].rect_xz(a0, b0, a1, b1, y, line)
+        B['side'].ring_xz(((fx0 + fx1) / 2, y, (fz0 + fz1) / 2), 4.0, 4.14, y, line, 32)
+        cz = (fz0 + fz1) / 2
+        for gx, s in ((fx0, 1), (fx1, -1)):
+            B['side'].rect_xz(min(gx, gx + s * 5), cz - 6, max(gx, gx + s * 5), cz - 5.88, y, line)
+            B['side'].rect_xz(min(gx, gx + s * 5), cz + 5.88, max(gx, gx + s * 5), cz + 6, y, line)
+            B['side'].rect_xz(gx + s * 5 - 0.06, cz - 6, gx + s * 5 + 0.06, cz + 6, y, line)
+            for dz in (-2.5, 2.5):                                         # goal posts
+                B['misc'].cylinder((gx, base + 1.2, cz + dz), 0.07, 2.4, line, seg=6)
+                self.collision.add(gx - 0.1, base, cz + dz - 0.1, gx + 0.1, base + 2.4, cz + dz + 0.1)
+            B['misc'].box((gx, base + 2.4, cz), (0.14, 0.14, 5.1), line)
+            B['misc'].box((gx - s * 0.9, base + 1.2, cz), (0.02, 2.4, 5.0), rgb(220, 220, 220, 255))
+        # stand (tribune) along the east side
+        sx0 = ix1 - 6.5
+        for r in range(4):
+            B['bld'].box((sx0 + 0.75 + r * 1.4, base + 0.35 + r * 0.7, (iz0 + iz1) / 2), (1.4, 0.7 + r * 1.4, iz1 - iz0 - 6),
+                         rgb(150, 150, 154) if r % 2 else rgb(130, 130, 136))
+            B['misc'].box((sx0 + 0.9 + r * 1.4, base + 0.95 + r * 1.4, (iz0 + iz1) / 2), (0.5, 0.25, iz1 - iz0 - 7),
+                          random.choice((rgb(200, 40, 40), rgb(40, 80, 180))))
+        self.collision.add(sx0, base, iz0 + 3, ix1, base + 5.6, iz1 - 3)
+        B['misc'].box((ix1 - 0.6, base + 6.5, (iz0 + iz1) / 2), (0.3, 2.0, iz1 - iz0 - 6), rgb(40, 42, 46))   # roof back
+        B['misc'].box((sx0 + 2.8, base + 7.4, (iz0 + iz1) / 2), (6.2, 0.2, iz1 - iz0 - 5), rgb(220, 220, 224))
+        for (lx, lz) in ((fx0 - 1.5, fz0 - 1), (fx0 - 1.5, fz1 + 1), (fx1 + 1.5, fz0 - 1), (fx1 + 1.5, fz1 + 1)):
+            B['misc'].cylinder((lx, base + 8.0, lz), 0.18, 16.0, POLE, seg=6)
+            B['lamps'].box((lx, base + 16.2, lz), (1.8, 1.0, 0.4), Color(1, 0.98, 0.92, 1))
+            self.collision.add(lx - 0.2, base, lz - 0.2, lx + 0.2, base + 16, lz + 0.2)
+            self.lamps.append((lx, base + 15.6, lz))
+        self.prop_spots.append(('box', (fx0 + fx1) / 2, cz))
+        self.pois.append(((fx0 + fx1) / 2, cz, 'field'))
+
+    def _park2(self, B, inner):
+        """Quiet park with a pond, a little bridge, trees and benches."""
+        ix0, iz0, ix1, iz1 = inner
+        base = CURB_H
+        B['side'].rect_xz(ix0, iz0, ix1, iz1, base + 0.012, jitter(GRASS, 0.04))
+        cx, cz = (ix0 + ix1) / 2, (iz0 + iz1) / 2
+        B['side'].ring_xz((cx, base + 0.02, cz), 0.0, 9.0, base + 0.02, rgb(150, 130, 100), 36)
+        B['neon'].ring_xz((cx, base + 0.03, cz), 0.0, 8.2, base + 0.03, rgb(46, 104, 140), 36)   # glints at night
+        self.collision.add(cx - 7.5, -1, cz - 7.5, cx + 7.5, base + 0.6, cz + 7.5)
+        # wooden bridge across the pond
+        B['misc'].box((cx, base + 0.75, cz), (19.0, 0.15, 2.0), rgb(130, 90, 55))
+        for s in (-1, 1):
+            B['misc'].box((cx, base + 1.35, cz + s * 0.95), (19.0, 0.08, 0.08), rgb(110, 76, 46))
+        path = rgb(196, 176, 140)
+        B['side'].rect_xz(ix0 - 0.5, cz - 1.2, cx - 9.0, cz + 1.2, base + 0.018, path)
+        B['side'].rect_xz(cx + 9.0, cz - 1.2, ix1 + 0.5, cz + 1.2, base + 0.018, path)
+        for _ in range(14):
+            a = random.uniform(0, 2 * math.pi)
+            r = random.uniform(11.0, 15.0)
+            tx, tz = cx + math.cos(a) * r, cz + math.sin(a) * r
+            if ix0 + 1.5 < tx < ix1 - 1.5 and iz0 + 1.5 < tz < iz1 - 1.5 and abs(tz - cz) > 2.5:
+                self._tree(B, tx, tz, random.uniform(0.9, 1.4))
+        for (bx, bz, rot) in ((cx - 11.0, cz + 3.5, 0), (cx + 11.0, cz - 3.5, 0), (cx, cz + 11.0, 0), (cx, cz - 11.0, 0)):
+            self._bench(B, bx, bz, rot)
 
     def _bench(self, B, x, z, rot):
         base = CURB_H

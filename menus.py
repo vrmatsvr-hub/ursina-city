@@ -116,7 +116,7 @@ class MenuCamera:
     def update(self, dt):
         self.a += dt * 0.035
         a = self.a
-        R = 115.0
+        R = 160.0
         pos = (math.cos(a) * R, 34.0 + 8.0 * math.sin(a * 1.7), math.sin(a) * R)
         look = (math.cos(a + 0.9) * 45.0, 4.0, math.sin(a + 0.9) * 45.0)
         d = (look[0] - pos[0], look[1] - pos[1], look[2] - pos[2])

@@ -36,89 +36,39 @@ class Humanoid:
         hair = hair or random.choice(HAIR)
         shoes = shoes or random.choice(SHOES)
         self.root = Entity(parent=parent if parent is not None else scene)
-        style = random.random()
-        sleeves_long = random.random() < 0.4
-        hood = random.random() < 0.18 and cap is None
-        hair_style = random.choice(('short', 'short', 'long', 'bun', 'buzz', 'curly'))
         up = MeshBuilder()
-        # hips + belt
-        up.hexa([(-0.17, 0.86, -0.1), (0.17, 0.86, -0.1), (0.17, 0.86, 0.1), (-0.17, 0.86, 0.1),
-                 (-0.18, 1.06, -0.11), (0.18, 1.06, -0.11), (0.18, 1.06, 0.11), (-0.18, 1.06, 0.11)], pants, bottom=True)
-        up.box((0, 1.04, 0), (0.37, 0.05, 0.23), rgb(30, 24, 20))
-        up.box((0, 1.04, 0.117), (0.05, 0.04, 0.01), rgb(190, 170, 90))
-        # torso: narrow waist, broad chest, sloped shoulders (lofted)
-        def ring(y, hw, hd, inset=0.0):
-            return [(-hw, y, -hd), (hw, y, -hd), (hw, y, hd), (-hw, y, hd)]
-        rings = [ring(1.06, 0.175, 0.105), ring(1.22, 0.17, 0.11), ring(1.36, 0.205, 0.125), ring(1.44, 0.225, 0.12),
-                 ring(1.5, 0.16, 0.1)]
-        from vehicles import loft
-        loft(up, rings, shirt)
-        if style < 0.3:                                       # open jacket over a t-shirt
-            inner = random.choice((rgb(240, 240, 240), rgb(30, 30, 34), rgb(180, 40, 40)))
-            up.box((0, 1.27, 0.122), (0.12, 0.38, 0.012), inner)
-            for sd in (-1, 1):
-                up.box((sd * 0.07, 1.4, 0.128), (0.05, 0.12, 0.01), col_mul(shirt, 0.75))
-        elif style < 0.5:                                     # chest stripe / print
-            up.box((0, 1.3, 0.125), (0.36, 0.06, 0.01), random.choice((rgb(240, 240, 240), rgb(240, 200, 40), rgb(30, 30, 34))))
-        if hood:
-            up.sphere((0, 1.5, -0.12), 0.13, col_mul(shirt, 0.9), 4, 8, squash=(1.3, 0.6, 0.8))
-        # neck + head
-        up.cylinder((0, 1.535, 0), 0.055, 0.09, skin, seg=8)
-        up.sphere((0, 1.665, 0.005), 0.12, skin, 6, 10, squash=(0.9, 1.08, 1.0))
-        up.box((0, 1.6, 0.06), (0.15, 0.06, 0.08), skin)                                    # jaw
-        for sd in (-1, 1):
-            up.box((sd * 0.112, 1.66, -0.005), (0.025, 0.05, 0.04), col_mul(skin, 0.95))     # ears
-            up.box((sd * 0.044, 1.688, 0.108), (0.034, 0.018, 0.008), rgb(245, 245, 245))   # eye white
-            up.box((sd * 0.044, 1.688, 0.112), (0.016, 0.018, 0.006), rgb(30, 26, 22))      # pupil
-            up.box((sd * 0.046, 1.716, 0.108), (0.042, 0.01, 0.01), col_mul(hair, 0.9))      # eyebrow
-        up.hexa([(-0.014, 1.64, 0.112), (0.014, 1.64, 0.112), (0.014, 1.64, 0.125), (-0.014, 1.64, 0.125),
-                 (-0.01, 1.68, 0.112), (0.01, 1.68, 0.112), (0.006, 1.68, 0.116), (-0.006, 1.68, 0.116)], col_mul(skin, 0.94))
-        up.box((0, 1.615, 0.106), (0.05, 0.008, 0.01), col_mul(skin, 0.7))                   # mouth
+        up.box((0, 0.97, 0), (0.36, 0.2, 0.22), pants)
+        up.hexa([(-0.19, 1.04, -0.115), (0.19, 1.04, -0.115), (0.19, 1.04, 0.115), (-0.19, 1.04, 0.115),
+                 (-0.235, 1.48, -0.125), (0.235, 1.48, -0.125), (0.235, 1.48, 0.125), (-0.235, 1.48, 0.125)],
+                shirt, bottom=True)
+        up.box((0, 1.53, 0), (0.1, 0.1, 0.1), skin)
+        up.sphere((0, 1.67, 0), 0.125, skin, 5, 8, squash=(0.92, 1.08, 1.0))
+        up.box((0, 1.765, -0.01), (0.25, 0.07, 0.26), hair)
+        up.box((0, 1.69, -0.105), (0.24, 0.14, 0.06), hair)
+        for s in (-1, 1):
+            up.box((s * 0.045, 1.685, 0.113), (0.03, 0.025, 0.012), rgb(20, 20, 24))
+        up.box((0, 1.655, 0.125), (0.03, 0.04, 0.03), col_mul(skin, 0.92))
         if cap is not None:
-            up.sphere((0, 1.735, -0.005), 0.128, cap, 4, 10, squash=(1.0, 0.55, 1.05))
-            up.box((0, 1.735, 0.14), (0.2, 0.02, 0.13), cap)                                 # peak
-        elif hair_style != 'buzz':
-            up.sphere((0, 1.71, -0.012), 0.13, hair, 4, 10, squash=(1.0, 0.62, 1.05))
-            up.box((0, 1.665, -0.095), (0.22, 0.13, 0.06), hair)
-            if hair_style == 'long':
-                up.box((0, 1.56, -0.11), (0.24, 0.26, 0.05), hair)
-                for sd in (-1, 1):
-                    up.box((sd * 0.115, 1.62, -0.03), (0.03, 0.18, 0.1), hair)
-            elif hair_style == 'bun':
-                up.sphere((0, 1.75, -0.11), 0.055, hair, 3, 7)
-            elif hair_style == 'curly':
-                for k in range(7):
-                    a = k / 7 * 2 * math.pi
-                    up.sphere((math.cos(a) * 0.1, 1.73, math.sin(a) * 0.1 - 0.01), 0.045, hair, 3, 6)
-        else:
-            up.sphere((0, 1.7, -0.01), 0.124, col_mul(hair, 0.8), 4, 10, squash=(1.0, 0.6, 1.04))
+            up.box((0, 1.795, 0), (0.27, 0.08, 0.28), cap)
+            up.box((0, 1.765, 0.17), (0.24, 0.025, 0.14), cap)
         self.pelvis = Entity(parent=self.root)          # moves down when the knees bend
         self.upper = up.entity(parent=self.pelvis)
         self.arms = []
         for s in (-1, 1):
             m = MeshBuilder()
-            m.sphere((0, 0.0, 0), 0.07, shirt, 3, 7)                                          # shoulder
-            m.cylinder((0, -0.15, 0), 0.058, 0.3, shirt, seg=8, radius_top=0.064)            # upper arm
-            if sleeves_long:
-                m.cylinder((0, -0.43, 0), 0.048, 0.28, shirt, seg=8, radius_top=0.056)
-                m.cylinder((0, -0.56, 0), 0.05, 0.03, col_mul(shirt, 0.8), seg=8)
-            else:
-                m.cylinder((0, -0.43, 0), 0.042, 0.28, skin, seg=8, radius_top=0.05)
-            m.box((0, -0.62, 0.01), (0.075, 0.1, 0.09), skin)                                 # hand
-            m.box((-s * 0.04, -0.6, 0.04), (0.025, 0.06, 0.03), skin)                         # thumb
-            self.arms.append(m.entity(parent=self.upper, position=(s * 0.27, 1.43, 0)))
+            m.box((0, -0.15, 0), (0.12, 0.31, 0.13), shirt)
+            m.box((0, -0.43, 0), (0.1, 0.28, 0.1), skin)
+            m.box((0, -0.61, 0.01), (0.09, 0.09, 0.1), skin)
+            self.arms.append(m.entity(parent=self.upper, position=(s * 0.29, 1.43, 0)))
         self.legs = []
         self.shins = []
         for s in (-1, 1):
             m = MeshBuilder()
-            m.cylinder((0, -0.22, 0), 0.078, 0.46, pants, seg=8, radius_top=0.092)           # thigh
-            thigh = m.entity(parent=self.pelvis, position=(s * 0.1, 0.9, 0))
+            m.box((0, -0.22, 0), (0.17, 0.46, 0.19), pants)
+            thigh = m.entity(parent=self.pelvis, position=(s * 0.11, 0.9, 0))
             m = MeshBuilder()
-            m.cylinder((0, -0.19, 0), 0.06, 0.4, pants, seg=8, radius_top=0.074)             # shin
-            m.cylinder((0, -0.36, 0), 0.062, 0.06, col_mul(pants, 0.85), seg=8)              # hem
-            m.box((0, -0.41, 0.045), (0.11, 0.1, 0.26), shoes)                                # shoe
-            m.box((0, -0.455, 0.05), (0.12, 0.025, 0.28), rgb(235, 235, 230) if shoes != rgb(240, 240, 240) else rgb(40, 40, 40))
-            m.box((0, -0.39, 0.16), (0.1, 0.06, 0.06), shoes)                                 # toe cap
+            m.box((0, -0.2, 0), (0.15, 0.42, 0.16), pants)
+            m.box((0, -0.42, 0.05), (0.16, 0.09, 0.28), shoes)
             shin = m.entity(parent=thigh, position=(0, -0.44, 0))
             self.legs.append(thigh)
             self.shins.append(shin)
@@ -159,7 +109,7 @@ class Humanoid:
         """Simple 2-axis IK: point each arm from its shoulder at its handlebar grip."""
         for i, sx in enumerate((-1, 1)):
             tx, ty, tz = self.grips[i]
-            dx = tx - sx * 0.27
+            dx = tx - sx * 0.29
             dy = ty - (1.43 + self.pelvis.y + self.upper.y)
             dz = tz
             rx = -math.degrees(math.atan2(dz, -dy))

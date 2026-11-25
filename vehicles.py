@@ -97,97 +97,6 @@ def wheel_builder(r, width, rim_col=None, trim_col=None, knobby=False):
     return mb
 
 
-def _nrm(v):
-    l = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) or 1.0
-    return (v[0] / l, v[1] / l, v[2] / l)
-
-
-def loft(mb, rings, col, caps=(True, True), center_fn=None, cols=None):
-    """Skin a series of cross-section rings (same point count) into a closed shape.
-    cols: optional per-face-index colour list (face k = between point k and k+1)."""
-    n = len(rings[0])
-    for i in range(len(rings) - 1):
-        A, Bq = rings[i], rings[i + 1]
-        ca = tuple(sum(p[c] for p in A) / n for c in range(3))
-        cb = tuple(sum(p[c] for p in Bq) / n for c in range(3))
-        cen = ((ca[0] + cb[0]) / 2, (ca[1] + cb[1]) / 2, (ca[2] + cb[2]) / 2)
-        for k in range(n):
-            a, b, c, d = A[k], A[(k + 1) % n], Bq[(k + 1) % n], Bq[k]
-            e1 = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
-            e2 = (d[0] - b[0], d[1] - b[1], d[2] - b[2])
-            nn = _nrm((e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]))
-            mid = ((a[0] + c[0]) / 2, (a[1] + c[1]) / 2, (a[2] + c[2]) / 2)
-            if nn[0] * (mid[0] - cen[0]) + nn[1] * (mid[1] - cen[1]) + nn[2] * (mid[2] - cen[2]) < 0:
-                nn = (-nn[0], -nn[1], -nn[2])
-            mb.quad(a, b, c, d, nn, cols[k] if cols else col)
-    for idx, flip in ((0, -1.0), (len(rings) - 1, 1.0)):
-        if not caps[0 if idx == 0 else 1]:
-            continue
-        R = rings[idx]
-        cx = sum(p[0] for p in R) / n
-        cy = sum(p[1] for p in R) / n
-        cz = sum(p[2] for p in R) / n
-        other = rings[1 if idx == 0 else -2]
-        oz = sum(p[2] for p in other) / n
-        nn = (0.0, 0.0, 1.0 if cz > oz else -1.0)
-        for k in range(n):
-            mb.tri((cx, cy, cz), R[k], R[(k + 1) % n], nn, col)
-
-
-def _section(z, hw, yb, ys, yt, hwt):
-    """Car body cross-section (8 points): tucked floor, vertical sides, rounded shoulders, top."""
-    return [(-hw * 0.93, yb, z), (hw * 0.93, yb, z), (hw, yb + 0.1, z), (hw, ys, z),
-            (hw * 0.5 + hwt * 0.5, (ys + yt) / 2 + 0.02, z), (hwt, yt, z),
-            (-hwt, yt, z), (-hw * 0.5 - hwt * 0.5, (ys + yt) / 2 + 0.02, z), (-hw, ys, z), (-hw, yb + 0.1, z)]
-
-
-# body silhouettes: (z as fraction of half-length, width frac, bottom, shoulder, top, top-width frac) - heights in metres
-CAR_SHAPES = {
-    'sedan': [(-1.0, 0.86, 0.36, 0.72, 0.86, 0.70), (-0.95, 0.97, 0.30, 0.80, 0.96, 0.86), (-0.82, 1.0, 0.26, 0.82, 1.0, 0.9),
-              (0.0, 1.0, 0.24, 0.82, 0.98, 0.9), (0.72, 1.0, 0.24, 0.8, 0.93, 0.9), (0.92, 0.98, 0.26, 0.74, 0.85, 0.86),
-              (1.0, 0.86, 0.32, 0.62, 0.74, 0.7)],
-    'taxi': None, 'police': None,
-    'hatch': [(-1.0, 0.9, 0.34, 0.8, 1.0, 0.78), (-0.94, 0.98, 0.28, 0.84, 1.04, 0.88), (0.0, 1.0, 0.24, 0.84, 1.0, 0.9),
-              (0.7, 1.0, 0.24, 0.8, 0.94, 0.9), (0.92, 0.97, 0.26, 0.72, 0.85, 0.85), (1.0, 0.86, 0.32, 0.6, 0.74, 0.7)],
-    'sports': [(-1.0, 0.84, 0.30, 0.6, 0.74, 0.7), (-0.94, 0.98, 0.24, 0.68, 0.84, 0.86), (-0.6, 1.0, 0.2, 0.7, 0.86, 0.88),
-               (0.0, 0.97, 0.2, 0.66, 0.8, 0.86), (0.55, 1.0, 0.2, 0.64, 0.74, 0.88), (0.88, 0.97, 0.21, 0.54, 0.62, 0.84),
-               (1.0, 0.84, 0.24, 0.42, 0.5, 0.66)],
-    'van': [(-1.0, 0.97, 0.4, 0.95, 1.08, 0.94), (-0.97, 1.0, 0.34, 0.98, 1.1, 0.96), (0.6, 1.0, 0.32, 0.98, 1.1, 0.96),
-            (0.8, 0.99, 0.32, 0.95, 1.06, 0.93), (0.94, 0.95, 0.34, 0.86, 0.96, 0.86), (1.0, 0.86, 0.38, 0.7, 0.82, 0.72)],
-}
-CAR_SHAPES['taxi'] = CAR_SHAPES['sedan']
-CAR_SHAPES['police'] = CAR_SHAPES['sedan']
-CHROME = rgb(200, 204, 210)
-
-
-def car_wheel(r, width, side=1, sporty=False):
-    """Tyre with sidewall bulge, 5-spoke rim, hub, brake disc and caliper. side=+1 right wheel, -1 left."""
-    mb = MeshBuilder()
-    s = side
-    mb.cylinder((0, 0, 0), r, width, rgb(22, 22, 24), seg=18, axis='x')
-    mb.cylinder((s * width * 0.36, 0, 0), r * 0.97, width * 0.32, rgb(34, 34, 36), seg=18, axis='x')   # sidewall
-    face = s * width * 0.5
-    mb.cylinder((face - s * 0.02, 0, 0), r * 0.68, 0.03, rgb(18, 18, 20), seg=16, axis='x')          # dark barrel
-    mb.cylinder((face - s * 0.07, 0, 0), r * 0.5, 0.025, rgb(120, 120, 124), seg=14, axis='x')       # brake disc
-    mb.box((face - s * 0.07, r * 0.32, -r * 0.18), (0.07, r * 0.3, r * 0.36), rgb(200, 30, 30) if sporty else rgb(80, 80, 84))
-    rim = rgb(205, 208, 214) if not sporty else rgb(40, 40, 44)
-    mb.cylinder((face, 0, 0), r * 0.68, 0.02, col_mul(rim, 0.85), seg=18, axis='x', radius_top=None) if False else None
-    # rim lip ring
-    for k in range(18):
-        a0, a1 = 2 * math.pi * k / 18, 2 * math.pi * (k + 1) / 18
-        p0 = (face, math.sin(a0) * r * 0.68, math.cos(a0) * r * 0.68)
-        p1 = (face, math.sin(a1) * r * 0.68, math.cos(a1) * r * 0.68)
-        q0 = (face, math.sin(a0) * r * 0.6, math.cos(a0) * r * 0.6)
-        q1 = (face, math.sin(a1) * r * 0.6, math.cos(a1) * r * 0.6)
-        mb.quad(p0, p1, q1, q0, (s, 0, 0), rim)
-    for k in range(5):                                                       # spokes
-        a = 2 * math.pi * k / 5
-        mb.beam((face, 0, 0), (face, math.sin(a) * r * 0.62, math.cos(a) * r * 0.62), r * 0.17, 0.035, rim)
-    mb.cylinder((face + s * 0.005, 0, 0), r * 0.17, 0.04, col_mul(rim, 0.8), seg=10, axis='x')
-    mb.cylinder((face + s * 0.03, 0, 0), r * 0.07, 0.02, rgb(30, 30, 30), seg=8, axis='x')
-    return mb
-
-
 def build_car(spec, kind, body):
     L, W, H = spec['L'], spec['W'], spec['H']
     r = spec['wheel_r']
@@ -195,206 +104,98 @@ def build_car(spec, kind, body):
              red=MeshBuilder(), blue=MeshBuilder())
     bb, gl = B['body'], B['glass']
     hl, hw = L / 2.0, W / 2.0
-    sports = kind == 'sports'
-    van = kind == 'van'
-    shape = CAR_SHAPES[kind]
-    hscale = 1.0
-    # ---- lower body as a lofted shell
-    def top_at(z):
-        """height of the body's top surface at z (interpolated through the stations)"""
-        zs = [st[0] * hl for st in shape]
-        for k in range(len(shape) - 1):
-            if zs[k] <= z <= zs[k + 1]:
-                t = (z - zs[k]) / (zs[k + 1] - zs[k])
-                return shape[k][4] * hscale + (shape[k + 1][4] - shape[k][4]) * hscale * t
-        return shape[-1][4] * hscale
-    rings = []
-    for (zf, wf, yb, ys, yt, tw) in shape:
-        rings.append(_section(zf * hl, hw * wf, yb, ys, yt, hw * tw))
-    nseg = len(rings[0])
-    cols = [body] * nseg
-    cols[0] = rgb(30, 30, 32)                         # floor
-    loft(bb, rings, body, cols=cols)
-    belt_rear, belt_front = top_at(-hl * 0.3), top_at(hl * 0.3)
-    belt = top_at(0.0)
-    # ---- greenhouse (cabin glass + roof)
-    if van:
-        cb0, cb1, ct0, ct1 = hl * 0.32, hl * 0.84, hl * 0.32, hl * 0.42
+    yb0 = r * 0.85
+    belt = yb0 + (0.48 if kind == 'sports' else 0.62)
+    hood = belt - (0.0 if kind == 'van' else 0.1)
+
+    def belt_at(z):
+        return belt + (hood - belt) * ((z + hl) / L)
+    # lower body with a sloped hood
+    bb.hexa([(-hw, yb0, -hl + 0.12), (hw, yb0, -hl + 0.12), (hw, yb0, hl - 0.15), (-hw, yb0, hl - 0.15),
+             (-hw, belt, -hl), (hw, belt, -hl), (hw, hood, hl), (-hw, hood, hl)], body, bottom=True)
+    if kind == 'van':
+        cargo_end = hl * 0.1
+        bb.box((0, (belt + H) / 2, (-hl + cargo_end) / 2), (W * 0.98, H - belt, cargo_end + hl), body)
+        cb0, cb1, ct0, ct1 = cargo_end, hl * 0.6, cargo_end, hl * 0.3
     elif kind == 'hatch':
-        cb0, cb1, ct0, ct1 = -hl * 0.86, hl * 0.4, -hl * 0.74, hl * 0.02
-    elif sports:
-        cb0, cb1, ct0, ct1 = -hl * 0.52, hl * 0.36, -hl * 0.26, -hl * 0.0
+        cb0, cb1, ct0, ct1 = -hl + 0.25, hl * 0.38, -hl + 0.42, hl * 0.02
+    elif kind == 'sports':
+        cb0, cb1, ct0, ct1 = -hl * 0.55, hl * 0.32, -hl * 0.28, -hl * 0.02
     else:
-        cb0, cb1, ct0, ct1 = -hl * 0.6, hl * 0.4, -hl * 0.36, hl * 0.06
-    roof_y = H - 0.06
-    if not van:
-        cwb, cwt = hw * 0.9, hw * 0.72
-        yb0, yb1 = top_at(cb0) - 0.01, top_at(cb1) - 0.01
-        g_rings = [[(-cwb, yb0, cb0), (cwb, yb0, cb0), (cwt, roof_y, ct0), (-cwt, roof_y, ct0)],
-                   [(-cwb, yb1, cb1), (cwb, yb1, cb1), (cwt, roof_y, ct1), (-cwt, roof_y, ct1)]]
-        gl.hexa([g_rings[0][0], g_rings[0][1], g_rings[1][1], g_rings[1][0],
-                 g_rings[0][3], g_rings[0][2], g_rings[1][2], g_rings[1][3]], GLASS)
-        # roof panel, slightly domed
-        bb.hexa([(-cwt - 0.03, roof_y, ct0 - 0.04), (cwt + 0.03, roof_y, ct0 - 0.04), (cwt + 0.03, roof_y, ct1 + 0.04),
-                 (-cwt - 0.03, roof_y, ct1 + 0.04),
-                 (-cwt + 0.05, H, ct0 + 0.05), (cwt - 0.05, H, ct0 + 0.05), (cwt - 0.05, H, ct1 - 0.05), (-cwt + 0.05, H, ct1 - 0.05)],
-                body, bottom=True)
-        # A / B / C pillars and window trim
-        trim = rgb(20, 20, 22)
-        for sd in (-1, 1):
-            bb.beam((sd * cwb, yb1, cb1), (sd * cwt, roof_y, ct1), 0.09, 0.07, body)
-            bb.beam((sd * cwb, yb0, cb0), (sd * cwt, roof_y, ct0), 0.13, 0.1, body)
-            mb_ = (cb0 + cb1) / 2 + (0.08 if not sports else 0.0)
-            mt_ = (ct0 + ct1) / 2
-            bb.beam((sd * cwb * 1.005, top_at(mb_), mb_), (sd * cwt * 1.005, roof_y, mt_), 0.1, 0.05, trim)
-            bb.beam((sd * (cwb + 0.005), yb0 + 0.02, cb0), (sd * (cwb + 0.005), yb1 + 0.02, cb1), 0.04, 0.04, trim)
-        if kind in ('sedan', 'taxi', 'police', 'hatch'):
-            bb.box((0, H + 0.03, (ct0 + ct1) / 2 - 0.2), (0.06, 0.06, 0.18), rgb(20, 20, 22))     # shark-fin antenna
-    else:
-        # van: cab glass up front, solid cargo box behind
-        cwb = hw * 0.95
-        yb0, yb1 = top_at(cb0), top_at(cb1)
-        top = H - 0.1
-        # cab glass: windshield sloping from the hood up to the roof, side windows down to the belt
-        gl.hexa([(-cwb, yb0, cb0), (cwb, yb0, cb0), (cwb, yb1, cb1), (-cwb, yb1, cb1),
-                 (-cwb, top, cb0), (cwb, top, cb0), (cwb, top, ct1), (-cwb, top, ct1)], GLASS)
-        # high cargo box with a rounded roof edge
-        cz0, cz1 = -hl, cb0
-        bb.box((0, (top + belt) / 2, (cz0 + cz1) / 2), (W, top - belt + 0.02, cz1 - cz0), body)
-        bb.box((0, top + 0.05, (cz0 + ct1) / 2), (W * 0.97, 0.1, ct1 - cz0), body)
-        bb.box((0, top + 0.02, ct1 + 0.04), (W * 0.97, 0.08, 0.1), body)
-        for sd in (-1, 1):
-            bb.beam((sd * cwb, yb1, cb1), (sd * cwb, top, ct1), 0.1, 0.08, body)                      # A-pillar
-            bb.box((sd * (hw + 0.012), belt + 0.75, -hl * 0.12), (0.02, 0.04, 1.7), rgb(30, 30, 32))   # sliding door rail
-            bb.box((sd * (hw + 0.012), (belt + top) / 2, cb0 - 0.9), (0.02, top - belt - 0.2, 0.03), rgb(40, 40, 42))
-        bb.box((0, (top + 0.4) / 2, -hl - 0.012), (0.03, top - 0.5, 0.02), rgb(40, 40, 42))           # rear door split
-        for sd in (-1, 1):
-            bb.box((sd * 0.5, top - 0.25, -hl - 0.015), (0.4, 0.3, 0.02), rgb(60, 80, 100))           # small rear windows
-    # ---- interior seats kept well under the roof
-    seat = rgb(30, 30, 32)
-    seat_z = (cb0 + cb1) / 2 - (0.1 if not van else 0.0)
-    for sd in (-1, 1):
-        bb.box((sd * hw * 0.42, belt - 0.2, seat_z), (0.5, 0.18, 0.5), seat)
-        bb.box((sd * hw * 0.42, min(belt + 0.15, H - 0.45), seat_z - 0.27), (0.48, min(0.62, H - 0.5 - belt + 0.5), 0.1), seat)
-    bb.box((0, belt - 0.02, cb1 - 0.28), (W * 0.84, 0.16, 0.32), rgb(24, 24, 26))                 # dashboard
-    bb.cylinder((-hw * 0.42, belt + 0.12, cb1 - 0.45), 0.17, 0.04, DARK, seg=12, axis='z')
-    # ---- wheel arches: dark wells + body-colour lips
-    wb2 = L * 0.6 / 2
-    for zc in (wb2, -wb2):
-        for sd in (-1, 1):
-            xw = sd * (hw * (1.0 if not sports else 1.0) + 0.006)
-            n = 12
-            for k in range(n):
-                a0 = math.pi * k / n
-                a1 = math.pi * (k + 1) / n
-                R1, R0 = r * 1.16, r * 0.2
-                p = lambda a, R: (xw, r + math.sin(a) * R, zc + math.cos(a) * R)
-                bb.quad(p(a0, R0), p(a1, R0), p(a1, R1), p(a0, R1), (sd, 0, 0), rgb(14, 14, 16))
-                q = lambda a, R: (xw + sd * 0.012, r + math.sin(a) * R, zc + math.cos(a) * R)
-                bb.quad(q(a0, R1), q(a1, R1), q(a1, R1 + 0.07), q(a0, R1 + 0.07), (sd, 0, 0),
-                        col_mul(body, 0.9) if not sports else rgb(25, 25, 28))
-    # ---- side details: skirts, door seams, handles, mirrors
-    for sd in (-1, 1):
-        xs = sd * (hw + 0.008)
-        bb.box((xs, 0.3, 0), (0.03, 0.12, L * 0.42), rgb(24, 24, 26) if not van else col_mul(body, 0.8))
-        if not van:
-            for zs in ((cb0 + cb1) / 2 + 0.05, cb1 - 0.05):
-                bb.box((xs, (belt + 0.32) / 2 + 0.1, zs), (0.015, belt - 0.42, 0.025), col_mul(body, 0.6))
-            for zs in ((cb0 + cb1) / 2 + 0.3, cb0 + 0.35):
-                bb.box((sd * (hw + 0.02), belt - 0.1, zs), (0.03, 0.04, 0.16), CHROME)
-        mz = cb1 - 0.1
-        my = top_at(cb1) + (0.12 if not van else 0.3)
-        bb.beam((sd * hw * 0.92, my - 0.05, mz), (sd * (hw + 0.16), my, mz - 0.02), 0.04, 0.04, rgb(24, 24, 26))
-        bb.box((sd * (hw + 0.19), my + 0.02, mz - 0.03), (0.08, 0.11, 0.17), body)
-        bb.box((sd * (hw + 0.19), my + 0.02, mz - 0.12), (0.06, 0.09, 0.01), rgb(150, 170, 190))
-    # ---- front: grille, lights, bumper, plate
-    zf = hl
-    nose_top = shape[-1][4]
-    nose_mid = (shape[-1][3] + shape[-1][2]) / 2
-    gw = W * (0.42 if not sports else 0.5)
-    bb.box((0, nose_mid - 0.02, zf + 0.005), (gw, 0.17 if not sports else 0.12, 0.03), rgb(18, 18, 20))
-    for k in range(3):
-        bb.box((0, nose_mid - 0.07 + k * 0.05, zf + 0.022), (gw * 0.95, 0.012, 0.012), CHROME if not sports else rgb(40, 40, 44))
-    lip_y = shape[-1][2] + 0.04
-    bb.box((0, lip_y, zf - 0.05), (W * 0.86, 0.1, 0.16), rgb(24, 24, 26))
-    bb.box((0, lip_y + 0.12, zf + 0.025), (0.5, 0.11, 0.015), rgb(240, 200, 30))                     # Dutch yellow plate
-    for sd in (-1, 1):
-        hx = sd * hw * 0.62
-        hy = (nose_top + nose_mid) / 2 + 0.02
-        bb.box((hx, hy, zf - 0.04), (W * 0.27, 0.15, 0.1), rgb(20, 20, 22))                            # housing
-        B['head'].box((hx - sd * 0.04, hy, zf - 0.005), (W * 0.15, 0.09, 0.06), Color(1, 1, 1, 1))
-        B['head'].box((hx + sd * 0.1, hy - 0.06, zf - 0.005), (W * 0.1, 0.025, 0.06), Color(1, 1, 1, 1))  # DRL strip
-    # ---- rear: tail lights, bumper, plate, exhausts, diffuser
-    zr = -hl
-    deck = shape[0][4]
-    rear_mid = (shape[0][3] + shape[0][2]) / 2
-    for sd in (-1, 1):
-        if van:
-            B['tail'].box((sd * hw * 0.9, belt + 0.25, zr - 0.005), (0.14, 0.5, 0.05), Color(1, 1, 1, 1))
-            bb.box((sd * hw * 0.9, belt + 0.25, zr + 0.005), (0.18, 0.56, 0.04), rgb(60, 10, 10))
-            continue
-        ty = (deck + rear_mid) / 2
-        B['tail'].box((sd * hw * 0.66, ty, zr + 0.005), (W * 0.26, 0.12, 0.06), Color(1, 1, 1, 1))
-        bb.box((sd * hw * 0.66, ty, zr + 0.02), (W * 0.3, 0.16, 0.06), rgb(60, 10, 10))
-    if sports:
-        B['tail'].box((0, (deck + rear_mid) / 2, zr + 0.005), (W * 0.5, 0.03, 0.05), Color(1, 1, 1, 1))     # light bar
-    bb.box((0, shape[0][2] + 0.05, zr + 0.04), (W * 0.86, 0.12, 0.14), rgb(24, 24, 26))
-    bb.box((0, rear_mid - 0.02, zr - 0.012), (0.5, 0.11, 0.015), rgb(240, 200, 30))
-    for sd in ((-1, 1) if sports else (1,)):
-        bb.cylinder((sd * hw * 0.45, shape[0][2] + 0.04, zr - 0.02), 0.045, 0.16, CHROME, seg=8, axis='z')
-    if sports:
-        for k in range(5):                                                                            # diffuser fins
-            bb.box((-0.4 + k * 0.2, shape[0][2] + 0.0, zr + 0.15), (0.02, 0.1, 0.3), rgb(20, 20, 22))
-        # rear wing on struts, side intakes, splitter
-        wy = deck + 0.28
-        for sd in (-1, 1):
-            bb.box((sd * hw * 0.55, deck + 0.14, -hl + 0.2), (0.05, 0.26, 0.1), rgb(20, 20, 22))
-            bb.box((sd * (hw + 0.004), 0.48, -hl * 0.25), (0.02, 0.14, 0.5), rgb(16, 16, 18))
-            bb.box((sd * hw * 0.96, wy, -hl + 0.16), (0.04, 0.16, 0.36), rgb(20, 20, 22))
-        bb.box((0, wy, -hl + 0.16), (W * 0.96, 0.04, 0.34), rgb(20, 20, 22))
-        bb.box((0, shape[-1][2] - 0.02, hl - 0.08), (W * 0.92, 0.03, 0.3), rgb(20, 20, 22))
+        cb0, cb1, ct0, ct1 = -hl * 0.58, hl * 0.36, -hl * 0.38, hl * 0.04
+    cwb, cwt = hw * 0.93, hw * 0.8
+    ry = H - 0.07
+    gl.hexa([(-cwb, belt_at(cb0), cb0), (cwb, belt_at(cb0), cb0), (cwb, belt_at(cb1), cb1), (-cwb, belt_at(cb1), cb1),
+             (-cwt, ry, ct0), (cwt, ry, ct0), (cwt, ry, ct1), (-cwt, ry, ct1)], GLASS)
+    bb.hexa([(-cwt - 0.03, ry, ct0 - 0.03), (cwt + 0.03, ry, ct0 - 0.03), (cwt + 0.03, ry, ct1 + 0.03), (-cwt - 0.03, ry, ct1 + 0.03),
+             (-cwt + 0.02, H, ct0), (cwt - 0.02, H, ct0), (cwt - 0.02, H, ct1), (-cwt + 0.02, H, ct1)], body, bottom=True)
+    # pillars
+    for s in (-1, 1):
+        bb.beam((s * cwb, belt_at(cb1), cb1), (s * cwt, ry, ct1), 0.08, 0.08, body)
+        bb.beam((s * cwb, belt_at(cb0), cb0), (s * cwt, ry, ct0), 0.12, 0.12, body)
+        mid_b = (cb0 + cb1) / 2
+        mid_t = (ct0 + ct1) / 2
+        bb.beam((s * cwb, belt_at(mid_b), mid_b), (s * cwt, ry, mid_t), 0.09, 0.06, body)
+    # interior (visible through the glass)
+    for s in (-1, 1):
+        bb.box((s * hw * 0.42, belt + 0.12, (cb0 + cb1) / 2 - 0.15), (0.5, 0.25, 0.5), rgb(30, 30, 32))
+        bb.box((s * hw * 0.42, belt + 0.4, (cb0 + cb1) / 2 - 0.42), (0.5, 0.6, 0.12), rgb(30, 30, 32))
+    bb.box((0, belt + 0.12, cb1 - 0.25), (W * 0.85, 0.2, 0.35), rgb(24, 24, 26))
+    bb.cylinder((-hw * 0.42, belt + 0.32, cb1 - 0.45), 0.17, 0.04, DARK, seg=10, axis='z')
+    # bumpers, grille, plates, mirrors
+    bb.box((0, yb0 + 0.12, hl - 0.05), (W * 0.98, 0.28, 0.2), TRIM)
+    bb.box((0, yb0 + 0.12, -hl + 0.06), (W * 0.98, 0.28, 0.2), TRIM)
+    bb.box((0, yb0 + 0.38, hl + 0.0), (W * 0.46, 0.16, 0.04), DARK)
+    bb.box((0, yb0 + 0.12, hl + 0.06), (0.52, 0.12, 0.02), rgb(240, 200, 30))
+    bb.box((0, belt - 0.32, -hl - 0.01), (0.52, 0.12, 0.02), rgb(240, 200, 30))
+    for s in (-1, 1):
+        bb.box((s * (hw + 0.08), belt + 0.1, cb1 - 0.15), (0.14, 0.1, 0.18), body)
+    # lights
+    B['head'].box((-hw * 0.62, (yb0 + hood) / 2 + 0.08, hl + 0.005), (W * 0.24, 0.12, 0.05), Color(1, 1, 1, 1))
+    B['head'].box((hw * 0.62, (yb0 + hood) / 2 + 0.08, hl + 0.005), (W * 0.24, 0.12, 0.05), Color(1, 1, 1, 1))
+    for s in (-1, 1):
+        B['tail'].box((s * hw * 0.7, belt - 0.14, -hl - 0.005), (W * 0.22, 0.14, 0.05), Color(1, 1, 1, 1))
+    # extras
+    if kind == 'sports':
+        for s in (-1, 1):
+            bb.box((s * hw * 0.6, belt + 0.14, -hl + 0.28), (0.06, 0.28, 0.1), DARK)
+        bb.box((0, belt + 0.3, -hl + 0.22), (W * 0.95, 0.05, 0.38), DARK)
+        bb.box((0, yb0 + 0.02, hl - 0.2), (W * 0.9, 0.06, 0.3), DARK)
     if kind == 'taxi':
-        bb.box((0, H + 0.04, (ct0 + ct1) / 2), (0.75, 0.06, 0.3), rgb(30, 30, 30))
-        B['head'].box((0, H + 0.15, (ct0 + ct1) / 2), (0.7, 0.18, 0.26), Color(1, 1, 1, 1))
-        for sd in (-1, 1):                                                                             # checker band
-            for k in range(14):
-                zc = -hl * 0.62 + k * (hl * 1.24 / 14)
-                bb.box((sd * (hw + 0.01), belt - 0.22, zc), (0.012, 0.09, hl * 1.24 / 14),
-                       rgb(240, 196, 20) if k % 2 == 0 else rgb(20, 20, 20))
+        B['head'].box((0, H + 0.12, (ct0 + ct1) / 2), (0.75, 0.2, 0.3), Color(1, 1, 1, 1))
+        bb.box((0, (yb0 + belt) / 2 + 0.05, 0), (W + 0.02, 0.12, L * 0.7), rgb(240, 196, 20))
     if kind == 'police':
         seg = 0.46
-        n = int(L * 0.8 / seg)
+        n = int(L * 0.86 / seg)
         for k in range(n):
-            zc = -L * 0.4 + (k + 0.5) * seg
-            for sd in (-1, 1):
-                bb.box((sd * (hw + 0.012), (0.3 + belt) / 2 + 0.03, zc), (0.02, 0.24, seg),
+            zc = -L * 0.43 + (k + 0.5) * seg
+            for s in (-1, 1):
+                bb.box((s * (hw + 0.012), (yb0 + belt) / 2 + 0.05, zc), (0.02, 0.26, seg),
                        rgb(20, 60, 200) if k % 2 == 0 else rgb(245, 215, 20))
-        bb.box((0, H + 0.04, (ct0 + ct1) / 2), (1.2, 0.06, 0.32), DARK)
-        B['red'].box((-0.33, H + 0.13, (ct0 + ct1) / 2), (0.5, 0.12, 0.26), Color(1, 1, 1, 1))
-        B['blue'].box((0.33, H + 0.13, (ct0 + ct1) / 2), (0.5, 0.12, 0.26), Color(1, 1, 1, 1))
-        for sd in (-1, 1):                                                                             # push bar
-            bb.box((sd * 0.35, lip_y + 0.15, hl + 0.12), (0.06, 0.42, 0.06), rgb(20, 20, 22))
-        bb.box((0, lip_y + 0.28, hl + 0.12), (0.8, 0.06, 0.06), rgb(20, 20, 22))
-    # ---- driver figure (seated low, head clears the roof)
+        bb.box((0, H + 0.06, (ct0 + ct1) / 2), (1.15, 0.08, 0.3), DARK)
+        B['red'].box((-0.33, H + 0.15, (ct0 + ct1) / 2), (0.44, 0.13, 0.26), Color(1, 1, 1, 1))
+        B['blue'].box((0.33, H + 0.15, (ct0 + ct1) / 2), (0.44, 0.13, 0.26), Color(1, 1, 1, 1))
+    # driver figure
     drv = MeshBuilder()
     shirt = random.choice((rgb(200, 60, 50), rgb(50, 90, 170), rgb(240, 240, 240), rgb(40, 40, 44), rgb(80, 140, 70)))
     if kind == 'police':
         shirt = rgb(30, 50, 110)
     skin = random.choice((rgb(240, 200, 170), rgb(200, 150, 110), rgb(140, 95, 65), rgb(90, 60, 45)))
-    dz = seat_z
+    # seated low in the seat and slightly reclined, scaled so the head always clears the roof
+    dz = (cb0 + cb1) / 2 - 0.2
     dx = -hw * 0.42
-    hip_y = belt - 0.12
-    sc = clampf((H - 0.16 - hip_y) / 0.8, 0.55, 1.0)
+    hip_y = belt - 0.3                                 # sit down into the seat, below the window line
+    sc = clampf((H - 0.12 - hip_y) / 0.8, 0.6, 1.0)
     tw, td, th = 0.42 * sc, 0.25 * sc, 0.46 * sc
-    lean = 0.1 * sc
+    lean = 0.1 * sc                                   # torso top leans back
     drv.hexa([(dx - tw / 2, hip_y, dz - td / 2), (dx + tw / 2, hip_y, dz - td / 2), (dx + tw / 2, hip_y, dz + td / 2), (dx - tw / 2, hip_y, dz + td / 2),
               (dx - tw / 2, hip_y + th, dz - td / 2 - lean), (dx + tw / 2, hip_y + th, dz - td / 2 - lean),
               (dx + tw / 2, hip_y + th, dz + td / 2 - lean), (dx - tw / 2, hip_y + th, dz + td / 2 - lean)], shirt, bottom=True)
     head = (dx, hip_y + th + 0.14 * sc, dz - lean - 0.01)
-    drv.sphere(head, 0.115 * sc, skin, 5, 9)
+    drv.sphere(head, 0.115 * sc, skin, 4, 8)
     drv.box((head[0], head[1] + 0.09 * sc, head[2] - 0.01), (0.23 * sc, 0.06 * sc, 0.24 * sc), rgb(40, 30, 24))
-    wheel = (dx, belt + 0.12, cb1 - 0.45)
-    for sxa in (-1, 1):
+    wheel = (dx, belt + 0.32, cb1 - 0.45)
+    for sxa in (-1, 1):                               # arms reaching for the steering wheel
         drv.beam((dx + sxa * tw / 2, hip_y + th - 0.05, dz - lean), (wheel[0] + sxa * 0.14, wheel[1], wheel[2] - 0.05),
                  0.08 * sc, 0.08 * sc, shirt)
     B['driver'] = drv
@@ -560,11 +361,6 @@ class Vehicle:
         self.last_marks = {}
         self.smoke_acc = 0.0
         self.impact_cooldown = 0.0
-        self._ax = 0.0
-        self.rear_spin = 0.0
-        self.pitch_v = self.roll_v = 0.0
-        self.ground_vy = 0.0
-        self.on_ground = True
         self.root = Entity(position=(x, self.y, z), rotation_y=heading)
         self.wheels = []
         self.front_pivots = []
@@ -688,253 +484,6 @@ class Vehicle:
                     acc_long -= math.copysign(min(abs(vl) / max(dt, 1e-4), dec), vl)
             vl += acc_long * dt
             vl -= vl * abs(vl) * 0.0011 * dt
-        if not two:
-            acc_long, vt = self._tire_dynamics(dt, thr, power, top)
-        else:
-            acc_long, vt = self._arcade_dynamics(dt, thr, two, vl, vt, acc_long, fx, fz, rx, rz)
-        self.x += self.vx * dt
-        self.z += self.vz * dt
-        # world collisions
-        impact = 0.0
-        hit_pt = None
-        (fx, fz), _ = heading_vectors(self.heading)
-        for off in self.circle_offsets:
-            cx, cz = self.x + fx * off, self.z + fz * off
-            nx_, nz_, n = w.collision.resolve_circle(cx, cz, self.radius, self.y + 0.25, self.y + self.height)
-            if n is not None:
-                self.x += nx_ - cx
-                self.z += nz_ - cz
-                # rigid-body impulse at the contact point: corner hits make the car spin
-                px, pz = fx * off - n[0] * self.radius, fz * off - n[1] * self.radius
-                rpx, rpz = pz, -px                        # contact velocity per rad/s of yaw
-                k2 = self.yaw_inertia()
-                wr = math.radians(self.yaw_rate)
-                vpx, vpz = self.vx + wr * rpx, self.vz + wr * rpz
-                vn = vpx * n[0] + vpz * n[1]
-                if vn < 0:
-                    rn = rpx * n[0] + rpz * n[1]
-                    j = -(1.0 + 0.25) * vn / (1.0 + rn * rn / k2)
-                    # scraping friction along the wall
-                    tx, tz = -n[1], n[0]
-                    vt_c = vpx * tx + vpz * tz
-                    rt = rpx * tx + rpz * tz
-                    jt = clampf(-vt_c / (1.0 + rt * rt / k2), -0.35 * j, 0.35 * j)
-                    self.vx += j * n[0] + jt * tx
-                    self.vz += j * n[1] + jt * tz
-                    wr += (j * rn + jt * rt) / k2
-                    self.yaw_rate = math.degrees(wr)
-                    impact = max(impact, -vn)
-                    hit_pt = (nx_ - n[0] * self.radius, self.y + 0.6, nz_ - n[1] * self.radius)
-        self.impact_cooldown -= dt
-        if impact > 3.0 and self.impact_cooldown <= 0:
-            self.on_impact(impact, hit_pt)
-        # vertical: rigid body + suspension spring
-        wb2 = self.wheelbase / 2.0
-        ghf = w.ground_height(self.x + fx * wb2, self.z + fz * wb2)
-        ghr = w.ground_height(self.x - fx * wb2, self.z - fz * wb2)
-        gh = (ghf + ghr) / 2.0
-        if self.y > gh + 0.04 and self.on_ground and self.ground_vy > 0.5:
-            self.vy = max(self.vy, self.ground_vy)        # driving off a ramp keeps its upward speed: real launches
-        if self.y > gh + 0.04 or self.vy > 0.1:
-            self.on_ground = False
-            self.ground_vy = 0.0
-            self.vy -= 18.0 * dt
-            self.y += self.vy * dt
-            if self.y <= gh:
-                if self.vy < -4:
-                    self.game.sound.play('thud', min(1.0, -self.vy / 12), 0.8, (self.x, self.y, self.z))
-                    if self.vy < -7 and self.driver == 'player':
-                        self.game.camera_rig.shake(min(1.0, -self.vy / 20.0))
-                self.susp_v += self.vy * 0.25
-                self.pitch_v += self.vy * -2.0                # landing slams the nose / tail
-                self.vy = 0.0
-                self.y = gh
-        else:
-            dg = gh - self.y
-            spd = self.speed
-            # gravity pulls you back on a slope (ramps), instead of a curb-style speed loss
-            slope = (ghf - ghr) / self.wheelbase
-            if abs(slope) > 0.02:
-                self.vx -= fx * 9.81 * slope * dt
-                self.vz -= fz * 9.81 * slope * dt
-            step = dg / max(spd * dt, 1e-3)                 # height gained per metre travelled
-            if dg > 0.04 and spd > 1.0 and step > 0.8:
-                k = 1.0 - self.absorb()
-                self.susp_v += dg * min(spd, 25.0) * 0.9 * k
-                loss = 1.0 - min(0.5, dg * 0.7 * k)
-                self.vx *= loss
-                self.vz *= loss
-                if two:
-                    self.yaw_rate += random.uniform(-25, 25) * k * dg * 5
-            elif dg < -0.04 and spd > 1.0:
-                self.susp_v += dg * min(spd, 25.0) * 0.4
-            self.on_ground = True
-            y_prev = self.y
-            if abs(step) <= 0.8:
-                self.y = gh                                  # smooth slope: wheels follow the surface
-            else:
-                self.y += dg * min(1.0, dt * 18.0)           # curb / step: the suspension soaks it up
-            self.vy = 0.0
-            self.ground_vy = clampf((self.y - y_prev) / max(dt, 1e-4), -20.0, 20.0)
-        self.airborne = self.y > gh + 0.3
-        self.susp_v += (-self.susp_k * self.susp - self.susp_c * self.susp_v) * dt
-        self.susp = clampf(self.susp + self.susp_v * dt, -0.25, 0.3)
-        # body attitude
-        slope = -math.degrees(math.atan2(ghf - ghr, self.wheelbase))
-        if two:
-            pitch_t = clampf(-acc_long * 0.4, -5.0, 5.0) + slope
-            roll_t = clampf(-vl * math.radians(self.yaw_rate) * 0.55, -6.0, 6.0)
-            self.pitch += (pitch_t - self.pitch) * min(1.0, dt * 6.0)
-            self.roll += (roll_t - self.roll) * min(1.0, dt * 6.0)
-        else:
-            # sprung body: dive under braking, squat on throttle, lean in corners - with a little overshoot
-            lat_acc = self.vl * math.radians(self.yaw_rate)
-            soft = 1.0 + (self.height - 1.4) * 0.6                     # tall vans lean more
-            pitch_t = clampf(-acc_long * 0.42 * soft, -6.5, 6.5) + slope
-            roll_t = clampf(-lat_acc * 0.5 * soft, -7.5, 7.5)
-            if self.airborne:
-                pitch_t = -math.degrees(math.atan2(self.vy, max(abs(self.vl), 2.0))) * 0.8   # nose follows the arc
-                roll_t = self.roll
-            on, z = 11.0, 0.38                                        # natural frequency (rad/s), damping ratio
-            self.pitch_v += (on * on * (pitch_t - self.pitch) - 2 * z * on * self.pitch_v) * dt
-            self.roll_v += (on * on * (roll_t - self.roll) - 2 * z * on * self.roll_v) * dt
-            self.pitch += self.pitch_v * dt
-            self.roll += self.roll_v * dt
-        self.spin_angle = (self.spin_angle + vl * dt / self.wheel_r * 57.2958) % 360.0
-        if self.burnout:
-            self.spin_angle = (self.spin_angle + 1400 * dt) % 360.0
-        self.update_visuals(dt)
-        self.effects(dt, vt)
-        # sleep when parked and settled
-        if (self.driver is None and self.ai is None and self.speed < 0.02 and abs(self.susp_v) < 0.01
-                and not self.airborne and abs(self.yaw_rate) < 0.5):
-            self.vx = self.vz = self.yaw_rate = 0.0
-            self.asleep = True
-
-    # ------------------------------------------------------------ car tyre model
-    def _tire_dynamics(self, dt, thr, power, top):
-        """Bicycle-model car physics:
-        * slip angle per axle with a Pacejka-style curve (grip peaks around 8 deg, then falls off)
-        * longitudinal weight transfer (braking loads the nose, throttle squats the rear)
-        * rear-wheel drive with a friction ellipse: too much throttle = wheelspin = less side grip
-        * handbrake locks the rear wheels, so the tail steps out; counter-steer + throttle holds a drift
-        * speed-sensitive steering lock, aero drag, rolling resistance, yaw inertia
-        Integrated in small sub-steps so it stays stable at any frame rate."""
-        G = 9.81
-        L = self.wheelbase
-        a = b = L * 0.5
-        cg_h = 0.5 * (self.height / 1.46)
-        k2 = (L * 0.5) ** 2 * 1.05                      # yaw inertia / mass
-        mu = self.grip_value() / 10.0 * 1.22             # a touch above real tyres: fun but believable
-        hb = self.handbrake and not self.airborne
-        h_lat = getattr(self, 'hb_lat', 0.45)
-        (fx, fz), (rx, rz) = heading_vectors(self.heading)
-        vl = self.vx * fx + self.vz * fz
-        vt = self.vx * rx + self.vz * rz
-        w = math.radians(self.yaw_rate)
-        ax_out = 0.0
-        if self.airborne:
-            # no tyre contact: keep momentum, slow spin
-            w *= math.exp(-0.3 * dt)
-            vl -= vl * abs(vl) * 0.0009 * dt
-        elif self.burnout:
-            vl *= math.exp(-3.0 * dt)
-            vt *= math.exp(-4.0 * dt)
-            w += (math.radians(self.steer * 150.0) - w) * min(1.0, dt * 4.0)
-        else:
-            steps = max(1, int(math.ceil(dt / (1.0 / 240.0))))
-            h = dt / steps
-            for _ in range(steps):
-                sp = abs(vl)
-                # speed-sensitive lock, but full counter-steer lock while the tail is sliding
-                slide = clampf(abs(math.atan2(vt - w * b, max(abs(vl), 3.0))) / 0.3, 0.0, 1.0)
-                delta = self.steer * math.radians(36.0) / (1.0 + (sp / 15.0) * (1.0 - slide))
-                cd, sd = math.cos(delta), math.sin(delta)
-                # ---- driver requests (accelerations, m/s^2)
-                drive = 0.0
-                brake = 0.0
-                if thr > 0.01:
-                    if vl < -0.4:
-                        brake = self.brake * thr
-                    else:
-                        f = clampf(1.0 - max(vl, 0.0) / max(top, 0.1), 0.0, 1.0)
-                        drive = self.accel_value() * power * thr * (0.32 + 0.68 * f)
-                        if vl > top:
-                            drive = -(vl - top) * 1.5
-                elif thr < -0.01:
-                    if vl > 0.4:
-                        brake = self.brake * (-thr)
-                    elif vl > -self.max_reverse:
-                        drive = -self.accel_value() * 0.55 * power * (-thr)
-                else:
-                    drive = -vl * 0.1 - math.copysign(0.45, vl) * min(1.0, abs(vl))   # engine braking + rolling
-                # ---- axle loads with weight transfer (fractions of the car's weight)
-                dN = clampf(self._ax * cg_h / L / G, -0.3, 0.3)
-                Nf = 0.5 - dN
-                Nr = 0.5 + dN
-                capf, capr = mu * Nf * G * 2.0, mu * Nr * G * 2.0     # per axle, per unit mass (x2: half the mass each)
-                # ---- front axle (steered): velocities in the wheel's own frame
-                vtf = vt + w * a
-                u = vl * cd + vtf * sd
-                s = -vl * sd + vtf * cd
-                af = math.atan2(s, max(abs(u), 3.0))
-                Fyw = -capf * 0.5 * math.sin(1.6 * math.atan(10.7 * af))
-                Fxw = -math.copysign(min(brake * 0.62, capf * 0.5), u) if brake > 0 and abs(u) > 0.05 else 0.0
-                # ---- rear axle (driven)
-                vtr = vt - w * b
-                ar = math.atan2(vtr, max(abs(vl), 3.0))
-                Fyr = -capr * 0.5 * math.sin(1.6 * math.atan(10.7 * ar))
-                Fxr = drive
-                if brake > 0 and abs(vl) > 0.05:
-                    Fxr -= math.copysign(brake * 0.38, vl)
-                # wheelspin memory: once the tail is out, throttle keeps the rear tyres spinning (drift)
-                spin_up = drive > capr * 0.5 * 1.15 and abs(self.steer) > 0.3 and not self.ai     # too much power: wheelspin
-                if (abs(ar) > 0.13 or hb or spin_up) and thr > 0.45 and sp > 3.0:
-                    self.rear_spin = min(1.0, self.rear_spin + h * 6.0)
-                else:
-                    self.rear_spin = max(0.0, self.rear_spin - h * (2.0 if thr > 0.2 else 4.0))
-                Fyr *= 1.0 - 0.38 * self.rear_spin
-                if hb:
-                    Fyr *= h_lat                                           # locked wheels slide sideways
-                    if abs(vl) > 0.05:
-                        Fxr -= math.copysign(min(self.hb_decel * 1.6, abs(vl) / h), vl)
-                # friction ellipse on the rear: wheelspin eats side grip (power oversteer)
-                lim = capr * 0.5
-                e = (Fxr / (lim * 1.3)) ** 2 + (Fyr / lim) ** 2
-                if e > 1.0 and not hb:
-                    k = 1.0 / math.sqrt(e)
-                    Fyr *= k
-                    Fxr *= max(k, 0.55)
-                # ---- sum in the body frame
-                ax = Fxr + Fxw * cd - Fyw * sd
-                ay = Fyr + Fxw * sd + Fyw * cd
-                torque = a * (Fyw * cd + Fxw * sd) - b * Fyr
-                ax -= vl * abs(vl) * 0.0011                                # aero drag
-                vl_new = vl + (ax + vt * w) * h
-                if (brake > 0 or hb) and vl != 0.0 and vl_new * vl < 0 and thr >= -0.01:
-                    vl_new = 0.0                                           # brakes stop the car, they don't reverse it
-                vt += (ay - vl * w) * h
-                vl = vl_new
-                w += torque / k2 * h
-                # low speed: wheels roll where they point (parking manoeuvres)
-                if sp < 5.0:
-                    kin = vl * math.tan(delta) / L
-                    blend = (1.0 - sp / 5.0) * min(1.0, h * 14.0)
-                    w += (kin - w) * blend
-                    vt *= 1.0 - (1.0 - sp / 5.0) * min(1.0, h * 10.0)
-                self.heading = (self.heading + math.degrees(w) * h) % 360.0
-                self._ax += (ax - self._ax) * min(1.0, h * 8.0)
-                ax_out = ax
-        (fx, fz), (rx, rz) = heading_vectors(self.heading)
-        self.vx = fx * vl + rx * vt
-        self.vz = fz * vl + rz * vt
-        self.vl = vl
-        self.yaw_rate = math.degrees(w)
-        self.drift_angle = math.degrees(math.atan2(vt, abs(vl) + 0.5))
-        return ax_out, vt
-
-    def _arcade_dynamics(self, dt, thr, two, vl, vt, acc_long, fx, fz, rx, rz):
-        """Original arcade model, still used by the e-scooters and e-motorbikes (they lean instead)."""
         sp = abs(vl)
         # steering
         sliding = (not two) and (abs(self.drift_angle) > 9 or (self.handbrake and sp > 3.0))
@@ -971,10 +520,75 @@ class Vehicle:
         self.vz = fz * vl + rz * vt
         self.vl = vl
         self.drift_angle = math.degrees(math.atan2(vt, abs(vl) + 0.5))
-        return acc_long, vt
-
-    def yaw_inertia(self):
-        return (self.wheelbase * 0.5) ** 2 * 1.05
+        self.x += self.vx * dt
+        self.z += self.vz * dt
+        # world collisions
+        impact = 0.0
+        hit_pt = None
+        (fx, fz), _ = heading_vectors(self.heading)
+        for off in self.circle_offsets:
+            cx, cz = self.x + fx * off, self.z + fz * off
+            nx_, nz_, n = w.collision.resolve_circle(cx, cz, self.radius, self.y + 0.25, self.y + self.height)
+            if n is not None:
+                self.x += nx_ - cx
+                self.z += nz_ - cz
+                vn = self.vx * n[0] + self.vz * n[1]
+                if vn < 0:
+                    self.vx -= 1.3 * vn * n[0]
+                    self.vz -= 1.3 * vn * n[1]
+                    impact = max(impact, -vn)
+                    hit_pt = (nx_ - n[0] * self.radius, self.y + 0.6, nz_ - n[1] * self.radius)
+                    self.yaw_rate *= 0.6
+        self.impact_cooldown -= dt
+        if impact > 3.0 and self.impact_cooldown <= 0:
+            self.on_impact(impact, hit_pt)
+        # vertical: rigid body + suspension spring
+        wb2 = self.wheelbase / 2.0
+        ghf = w.ground_height(self.x + fx * wb2, self.z + fz * wb2)
+        ghr = w.ground_height(self.x - fx * wb2, self.z - fz * wb2)
+        gh = (ghf + ghr) / 2.0
+        if self.y > gh + 0.04 or self.vy > 0.1:
+            self.vy -= 18.0 * dt
+            self.y += self.vy * dt
+            if self.y <= gh:
+                if self.vy < -4:
+                    self.game.sound.play('thud', min(1.0, -self.vy / 12), 0.8, (self.x, self.y, self.z))
+                self.susp_v += self.vy * 0.25
+                self.vy = 0.0
+                self.y = gh
+        else:
+            dg = gh - self.y
+            spd = self.speed
+            if dg > 0.04 and spd > 1.0:
+                k = 1.0 - self.absorb()
+                self.susp_v += dg * min(spd, 25.0) * 0.9 * k
+                loss = 1.0 - min(0.5, dg * 0.7 * k)
+                self.vx *= loss
+                self.vz *= loss
+                if two:
+                    self.yaw_rate += random.uniform(-25, 25) * k * dg * 5
+            elif dg < -0.04 and spd > 1.0:
+                self.susp_v += dg * min(spd, 25.0) * 0.4
+            self.y += dg * min(1.0, dt * 18.0)
+            self.vy = 0.0
+        self.airborne = self.y > gh + 0.3
+        self.susp_v += (-self.susp_k * self.susp - self.susp_c * self.susp_v) * dt
+        self.susp = clampf(self.susp + self.susp_v * dt, -0.25, 0.3)
+        # body attitude
+        pitch_t = clampf(-acc_long * 0.4, -5.0, 5.0) - math.degrees(math.atan2(ghf - ghr, self.wheelbase))
+        roll_t = clampf(-vl * math.radians(self.yaw_rate) * 0.55, -6.0, 6.0)
+        self.pitch += (pitch_t - self.pitch) * min(1.0, dt * 6.0)
+        self.roll += (roll_t - self.roll) * min(1.0, dt * 6.0)
+        self.spin_angle = (self.spin_angle + vl * dt / self.wheel_r * 57.2958) % 360.0
+        if self.burnout:
+            self.spin_angle = (self.spin_angle + 1400 * dt) % 360.0
+        self.update_visuals(dt)
+        self.effects(dt, vt)
+        # sleep when parked and settled
+        if (self.driver is None and self.ai is None and self.speed < 0.02 and abs(self.susp_v) < 0.01
+                and not self.airborne and abs(self.yaw_rate) < 0.5):
+            self.vx = self.vz = self.yaw_rate = 0.0
+            self.asleep = True
 
     def on_impact(self, impact, pt):
         self.impact_cooldown = 0.25
@@ -1066,7 +680,7 @@ class Car(Vehicle):
         self.spec = spec
         self.kind = kind
         self.length, self.width, self.height = spec['L'], spec['W'], spec['H']
-        self.track = spec['W'] - 0.2
+        self.track = spec['W'] - 0.25
         self.wheel_r = spec['wheel_r']
         self.wheelbase = spec['L'] * 0.6
         self.max_speed = spec['top']
@@ -1108,7 +722,7 @@ class Car(Vehicle):
         hz = self.wheelbase / 2
         for (x, z, front) in ((-hx, hz, True), (hx, hz, True), (-hx, -hz, False), (hx, -hz, False)):
             pivot = Entity(parent=self.root, position=(x, r, z))
-            wheel = car_wheel(r, 0.26, 1 if x > 0 else -1, self.kind == 'sports').entity(parent=pivot)
+            wheel = wheel_builder(r, 0.26).entity(parent=pivot)
             self.wheels.append(wheel)
             if front:
                 self.front_pivots.append(pivot)
@@ -1521,7 +1135,7 @@ class VehicleManager:
             self.spawn_car(random.choice(kinds), x, z, h + random.uniform(-3, 3))
         # cars parked along the curb, plus scattered e-scooters / e-motorbikes
         rng = random.Random(42)
-        for _ in range(17):
+        for _ in range(10):
             idx = rng.randint(1, N_BLOCKS - 1)
             k = rng.randint(0, N_BLOCKS - 1)
             along = ROADS[k] + HALF_ROAD + rng.uniform(10, 30)
@@ -1529,15 +1143,14 @@ class VehicleManager:
                 self.spawn_car(rng.choice(kinds), ROADS[idx] + 5.0, along, 0.0)
             else:
                 self.spawn_car(rng.choice(kinds), along, ROADS[idx] - 5.0, 90.0)
-        for _ in range(8):
+        for _ in range(5):
             idx = rng.randint(0, N_BLOCKS)
             k = rng.randint(0, N_BLOCKS - 1)
             along = ROADS[k] + HALF_ROAD + rng.uniform(8, 32)
             kind = rng.choice(('scooter', 'motorbike', 'scooter', 'kickscooter'))
             side = rng.choice((-1, 1))
             x, z = ROADS[idx] + side * (HALF_ROAD + 1.2), along
-            gy = self.world.ground_height(x, z)
-            if gy > 0.1 and self.world.collision.resolve_circle(x, z, 0.9, gy + 0.3, gy + 1.2)[2] is None:
+            if self.world.ground_height(x, z) > 0.1:
                 v = self.spawn_two_wheeler(kind, x, z, 0.0 if side > 0 else 180.0)
                 if kind == 'kickscooter':
                     continue                    # KuKirins always spawn in stock colours
@@ -1560,7 +1173,7 @@ class VehicleManager:
                                 battery=v.battery_tier, battery_owned=getattr(v, 'battery_owned', v.battery_tier),
                                 susp=v.susp_tier, susp_owned=sorted(getattr(v, 'susp_owned', {0})),
                                 primary=v.primary, accent=v.accent, charge=round(float(v.battery_wh), 1),
-                                x=round(v.x, 2), z=round(v.z, 2), h=round(v.heading, 1), map=2)
+                                x=round(v.x, 2), z=round(v.z, 2), h=round(v.heading, 1))
         return out
 
     def load_tuned(self, data):
@@ -1583,11 +1196,7 @@ class VehicleManager:
                 if (p, a) != (v.primary, v.accent):
                     v.primary, v.accent = p, a
                     v.build_model()
-                spot_ok = False
-                if 'x' in d and d.get('map') == 2:          # parking spots from the old (smaller) city are ignored
-                    gy = self.world.ground_height(float(d['x']), float(d['z']))
-                    spot_ok = self.world.collision.resolve_circle(float(d['x']), float(d['z']), 0.6, gy + 0.3, gy + 1.2)[2] is None
-                if spot_ok:
+                if 'x' in d:
                     v.x, v.z, v.heading = float(d['x']), float(d['z']), float(d.get('h', v.heading)) % 360.0
                     v.y = self.world.ground_height(v.x, v.z)
                     v.vx = v.vz = v.vy = v.yaw_rate = 0.0
@@ -1648,26 +1257,13 @@ class VehicleManager:
                     a.z -= nz * pen * wa
                     b.x += nx * pen * wb_
                     b.z += nz * pen * wb_
-                    # contact point halfway between the two circles; full 2D rigid-body impulse with spin
-                    cpx, cpz = ax + nx * a.radius, az + nz * a.radius
-                    ra = (cpz - a.z, -(cpx - a.x))
-                    rb = (cpz - b.z, -(cpx - b.x))
-                    wa_, wb2 = math.radians(a.yaw_rate), math.radians(b.yaw_rate)
-                    va = (a.vx + wa_ * ra[0], a.vz + wa_ * ra[1])
-                    vb = (b.vx + wb2 * rb[0], b.vz + wb2 * rb[1])
-                    rv = (vb[0] - va[0]) * nx + (vb[1] - va[1]) * nz
+                    rv = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz
                     if rv < 0:
-                        ka, kb = a.yaw_inertia(), b.yaw_inertia()
-                        rna = ra[0] * nx + ra[1] * nz
-                        rnb = rb[0] * nx + rb[1] * nz
-                        denom = 1.0 / a.mass + 1.0 / b.mass + rna * rna / (a.mass * ka) + rnb * rnb / (b.mass * kb)
-                        j = -(1.0 + 0.3) * rv / denom
+                        j = -(1.3) * rv / (1.0 / a.mass + 1.0 / b.mass)
                         a.vx -= j * nx / a.mass
                         a.vz -= j * nz / a.mass
                         b.vx += j * nx / b.mass
                         b.vz += j * nz / b.mass
-                        a.yaw_rate -= math.degrees(j * rna / (a.mass * ka))
-                        b.yaw_rate += math.degrees(j * rnb / (b.mass * kb))
                         a.asleep = b.asleep = False
                         if -rv > 3.0:
                             for v in (a, b):

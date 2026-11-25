@@ -70,8 +70,8 @@ def read_version():
 GFX_LIGHTS = (4, 8, 16)          # point lights computed per pixel
 GFX_CULL_CARS = (85, 130, 220)   # cars further away than this are hidden
 GFX_CULL_PEDS = (70, 105, 160)   # same for people
-GFX_TRAFFIC = (9, 13, 17)        # moving traffic cars   (needs a restart)
-GFX_PEDS = (20, 30, 38)          # pedestrians           (needs a restart)
+GFX_TRAFFIC = (7, 10, 13)        # moving traffic cars   (needs a restart)
+GFX_PEDS = (16, 24, 30)          # pedestrians           (needs a restart)
 _boot_gfx = int(load_save().get('settings', {}).get('gfx', DEFAULT_SETTINGS['gfx']))
 try:
     from panda3d.core import loadPrcFileData
